@@ -1,0 +1,41 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+!.env.example
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Alembic
+alembic/versions/*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests / Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Docker
+*.log
