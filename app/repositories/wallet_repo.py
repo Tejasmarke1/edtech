@@ -36,10 +36,16 @@ def create_withdrawal(db: Session, teacher_id: str, amount: int) -> Withdrawal:
     return withdrawal
 
 
-def get_withdrawals(db: Session, teacher_id: str) -> list[Withdrawal]:
-    return (
-        db.query(Withdrawal)
-        .filter(Withdrawal.teacher_id == teacher_id)
+def get_withdrawals(
+    db: Session, teacher_id: str, *, skip: int = 0, limit: int = 20
+) -> tuple[list[Withdrawal], int]:
+    base = db.query(Withdrawal).filter(Withdrawal.teacher_id == teacher_id)
+    total = base.count()
+    items = (
+        base
         .order_by(Withdrawal.request_at.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
+    return items, total

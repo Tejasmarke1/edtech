@@ -11,8 +11,13 @@ from app.models.teacher import TeacherProfile, TeacherSubjectMasterList, Teacher
 from app.models.user import User, UserProfile, UserRole
 
 
-def search_teachers_by_topic(db: Session, topic: str) -> list[dict]:
-    """Return teachers who teach a subject matching the topic keyword."""
+def search_teachers_by_topic(
+    db: Session, topic: str, *, skip: int = 0, limit: int = 20
+) -> tuple[list[dict], int]:
+    """Return teachers who teach a subject matching the topic keyword.
+
+    Returns (results, total_count) to support pagination.
+    """
     # Find subjects matching the topic (case-insensitive ILIKE)
     pattern = f"%{topic}%"
     matching_subjects = (
@@ -22,7 +27,7 @@ def search_teachers_by_topic(db: Session, topic: str) -> list[dict]:
     )
 
     # Find distinct teacher user_names with active entries for those subjects
-    teacher_usernames = (
+    base_query = (
         db.query(TeacherSubjectMasterList.user_name)
         .filter(
             TeacherSubjectMasterList.sub_id.in_(
@@ -31,16 +36,23 @@ def search_teachers_by_topic(db: Session, topic: str) -> list[dict]:
             TeacherSubjectMasterList.is_active.is_(True),
         )
         .distinct()
+    )
+
+    total = base_query.count()
+    if total == 0:
+        return [], 0
+
+    teacher_usernames = (
+        base_query
+        .order_by(TeacherSubjectMasterList.user_name)
+        .offset(skip)
+        .limit(limit)
         .all()
     )
     usernames = [row[0] for row in teacher_usernames]
-    if not usernames:
-        return []
 
-    results = []
-    for uname in usernames:
-        results.append(_build_teacher_summary(db, uname))
-    return results
+    results = [_build_teacher_summary(db, uname) for uname in usernames]
+    return results, total
 
 
 def get_teacher_detail(db: Session, teacher_username: str) -> dict | None:

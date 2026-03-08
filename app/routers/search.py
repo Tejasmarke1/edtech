@@ -7,17 +7,21 @@ from app.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.schemas.search import TeacherDetailRead, TeacherSearchResult
 from app.services import search_service
+from app.utils.pagination import Page, PaginationParams
 
 router = APIRouter()
 
 
-@router.get("", response_model=list[TeacherSearchResult])
+@router.get("", response_model=Page[TeacherSearchResult])
 def search_teachers(
     topic: str = Query(..., min_length=1, description="Subject/topic keyword"),
+    pagination: PaginationParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return search_service.search_teachers(db, topic)
+    return search_service.search_teachers(
+        db, topic, skip=pagination.skip, limit=pagination.limit
+    )
 
 
 @router.get(

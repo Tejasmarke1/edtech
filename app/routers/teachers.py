@@ -16,6 +16,7 @@ from app.schemas.teacher import (
 )
 from app.schemas.wallet import WalletRead, WithdrawalRead, WithdrawalRequest
 from app.services import teacher_service
+from app.utils.pagination import Page, PaginationParams
 
 router = APIRouter()
 
@@ -113,12 +114,15 @@ def add_video(
 
 
 # ==================== Availability ====================
-@router.get("/availability", response_model=list[AvailabilitySlotRead])
+@router.get("/availability", response_model=Page[AvailabilitySlotRead])
 def get_availability(
+    pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
     user: User = Depends(require_teacher),
 ):
-    return teacher_service.get_availability(db, user)
+    return teacher_service.get_availability(
+        db, user, skip=pagination.skip, limit=pagination.limit
+    )
 
 
 @router.post("/availability", response_model=AvailabilitySlotRead, status_code=201)
@@ -167,9 +171,12 @@ def request_withdrawal(
     return teacher_service.request_withdrawal(db, user, payload)
 
 
-@router.get("/withdrawals", response_model=list[WithdrawalRead])
+@router.get("/withdrawals", response_model=Page[WithdrawalRead])
 def get_withdrawals(
+    pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
     user: User = Depends(require_teacher),
 ):
-    return teacher_service.get_withdrawal_history(db, user)
+    return teacher_service.get_withdrawal_history(
+        db, user, skip=pagination.skip, limit=pagination.limit
+    )

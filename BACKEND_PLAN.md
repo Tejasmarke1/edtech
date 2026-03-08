@@ -493,8 +493,8 @@ Withdrawal    →  via teacher_profile.upi_id, tracked in withdrawal table
 | 7 | ~~Teacher module (profile, subjects, videos, availability)~~ | ✅ Done |
 | 8 | ~~Student module (profile, search)~~ | ✅ Done |
 | 9 | Session scheduling (full flow) | ⬜ Next |
-| 10 | Notifications | ⬜ |
-| 11 | Ratings | ⬜ |
+| 10 | ⬜ |
+| 11 | Ratings | ⬜ | Notifications |
 | 12 | Payments & earnings | ⬜ |
 | 13 | Jitsi integration | ⬜ |
 | 14 | Tests | ⬜ |

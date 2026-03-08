@@ -7,11 +7,20 @@ from sqlalchemy.orm import Session
 from app.models.availability import AvailabilitySlot
 
 
-def get_slots_for_teacher(db: Session, user_name: str, active_only: bool = True) -> list[AvailabilitySlot]:
+def get_slots_for_teacher(
+    db: Session, user_name: str, active_only: bool = True, *, skip: int = 0, limit: int = 20
+) -> tuple[list[AvailabilitySlot], int]:
     q = db.query(AvailabilitySlot).filter(AvailabilitySlot.user_name == user_name)
     if active_only:
         q = q.filter(AvailabilitySlot.is_active.is_(True))
-    return q.order_by(AvailabilitySlot.day_of_week, AvailabilitySlot.start_time).all()
+    total = q.count()
+    items = (
+        q.order_by(AvailabilitySlot.day_of_week, AvailabilitySlot.start_time)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return items, total
 
 
 def get_slot_by_id(db: Session, slot_id: str) -> AvailabilitySlot | None:

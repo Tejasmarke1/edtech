@@ -96,8 +96,18 @@ def add_video(db: Session, user: User, sub_id: str, payload: AddVideoRequest) ->
 
 
 # ---------- Availability ----------
-def get_availability(db: Session, user: User):
-    return availability_repo.get_slots_for_teacher(db, user.user_name)
+def get_availability(db: Session, user: User, *, skip: int = 0, limit: int = 20):
+    items, total = availability_repo.get_slots_for_teacher(
+        db, user.user_name, skip=skip, limit=limit
+    )
+    from app.utils.pagination import Page
+    from app.schemas.availability import AvailabilitySlotRead
+    return Page(
+        items=[AvailabilitySlotRead.model_validate(s) for s in items],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
 
 
 def add_availability_slot(db: Session, user: User, payload: AvailabilitySlotCreate):
@@ -140,5 +150,15 @@ def request_withdrawal(db: Session, user: User, payload: WithdrawalRequest):
     return wallet_repo.create_withdrawal(db, user.user_name, payload.amount)
 
 
-def get_withdrawal_history(db: Session, user: User):
-    return wallet_repo.get_withdrawals(db, user.user_name)
+def get_withdrawal_history(db: Session, user: User, *, skip: int = 0, limit: int = 20):
+    items, total = wallet_repo.get_withdrawals(
+        db, user.user_name, skip=skip, limit=limit
+    )
+    from app.utils.pagination import Page
+    from app.schemas.wallet import WithdrawalRead
+    return Page(
+        items=[WithdrawalRead.model_validate(w) for w in items],
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
