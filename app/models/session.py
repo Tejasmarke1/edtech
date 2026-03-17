@@ -3,7 +3,7 @@
 import enum
 from datetime import date
 
-from sqlalchemy import Date, Enum, ForeignKey, String, Text
+from sqlalchemy import Date, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base, TimestampMixin
@@ -16,6 +16,12 @@ class SessionStatus(str, enum.Enum):
     rescheduled = "Rescheduled"
     completed = "Completed"
     cancelled = "Cancelled"
+    open = "Open"  # Group sessions start as Open
+
+
+class SessionType(str, enum.Enum):
+    individual = "individual"
+    group = "group"
 
 
 class SessionSchedule(TimestampMixin, Base):
@@ -24,15 +30,21 @@ class SessionSchedule(TimestampMixin, Base):
     __tablename__ = "session_schedule"
 
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    session_type: Mapped[SessionType] = mapped_column(
+        Enum(SessionType, name="session_type"),
+        default=SessionType.individual,
+        nullable=False,
+    )
     teacher_id: Mapped[str] = mapped_column(
         String(255),
         ForeignKey("user.user_name", ondelete="CASCADE"),
         nullable=False,
     )
-    student_id: Mapped[str] = mapped_column(
+    # Nullable: populated for individual sessions; NULL for group sessions
+    student_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("user.user_name", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     subject_master_id: Mapped[str] = mapped_column(
         String(255),
@@ -51,7 +63,9 @@ class SessionSchedule(TimestampMixin, Base):
         default=SessionStatus.requested,
         nullable=False,
     )
+    max_students: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meeting_link: Mapped[str | None] = mapped_column(String(500))
+    room_name: Mapped[str | None] = mapped_column(String(100))
 
     teacher: Mapped["User"] = relationship(
         back_populates="teacher_sessions", foreign_keys=[teacher_id]
@@ -66,6 +80,12 @@ class SessionSchedule(TimestampMixin, Base):
     ratings: Mapped[list["Rating"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    enrollments: Mapped[list["SessionEnrollment"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    payment_transactions: Mapped[list["PaymentTransaction"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
-        return f"<SessionSchedule {self.id} status={self.status.value}>"
+        return f"<SessionSchedule {self.id} type={self.session_type.value} status={self.status.value}>"

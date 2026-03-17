@@ -6,7 +6,7 @@ from app.models.teacher import TeacherProfile, TeacherSubjectMasterList, Teacher
 from app.models.user import User
 from app.repositories import availability_repo, subject_repo, teacher_repo, wallet_repo
 from app.schemas.availability import AvailabilitySlotCreate, AvailabilitySlotUpdate
-from app.schemas.teacher import AddSubjectRequest, AddVideoRequest, TeacherProfileUpdate
+from app.schemas.teacher import AddSubjectRequest, AddVideoRequest, TeacherProfileUpdate, TeacherVideoAccessRead
 from app.schemas.wallet import WithdrawalRequest
 from app.utils.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
@@ -95,6 +95,15 @@ def add_video(db: Session, user: User, sub_id: str, payload: AddVideoRequest) ->
     )
 
 
+def get_video_access_url(db: Session, user: User, video_id: str) -> TeacherVideoAccessRead:
+    video = teacher_repo.get_video_by_id(db, video_id)
+    if not video:
+        raise NotFoundError("Video not found")
+    if video.user_name != user.user_name:
+        raise ForbiddenError("You cannot access this video")
+    return TeacherVideoAccessRead(id=video.id, video_url=video.video_url)
+
+
 # ---------- Availability ----------
 def get_availability(db: Session, user: User, *, skip: int = 0, limit: int = 20):
     items, total = availability_repo.get_slots_for_teacher(
@@ -136,8 +145,13 @@ def get_earnings(db: Session, user: User):
     return wallet_repo.get_or_create_wallet(db, user.user_name)
 
 
+def get_monthly_earnings(db: Session, user: User, year: int, month: int) -> dict:
+    return wallet_repo.get_monthly_earnings(db, user.user_name, year, month)
+
+
 def request_withdrawal(db: Session, user: User, payload: WithdrawalRequest):
-    wallet = wallet_repo.get_or_create_wallet(db, user.user_name)
+    # Lock wallet row to prevent concurrent overdraw
+    wallet = wallet_repo.get_or_create_wallet(db, user.user_name, lock=True)
     if payload.amount > wallet.current_balance:
         raise BadRequestError(
             f"Insufficient balance. Available: {wallet.current_balance}"

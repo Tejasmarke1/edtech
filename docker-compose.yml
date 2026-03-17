@@ -1,4 +1,6 @@
 services:
+  # ======================== BACKEND ========================
+
   # ---------- FastAPI Application ----------
   app:
     build:
@@ -10,18 +12,41 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://edtech:edtech_secret@postgres:5432/edtech_db
+      DATABASE_URL: postgresql://${POSTGRES_USER:-edtech}:${POSTGRES_PASSWORD:-edtech_secret}@postgres:5432/${POSTGRES_DB:-edtech_db}
       REDIS_URL: redis://redis:6379/0
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    volumes:
-      - .:/app # hot-reload in dev
-      - /app/.venv  # exclude local .venv from mount
+      # Public/browser-reachable URL used in meeting links returned by the API.
+      JITSI_URL: ${JITSI_URL:-https://127.0.0.1:8443}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - backend-net
+      - jitsi-net
+
+  # ---------- Celery Worker ----------
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: edtech-celery-worker
+    entrypoint: []
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-edtech}:${POSTGRES_PASSWORD:-edtech_secret}@postgres:5432/${POSTGRES_DB:-edtech_db}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - backend-net
 
   # ---------- PostgreSQL ----------
   postgres:
@@ -41,6 +66,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - backend-net
 
   # ---------- Redis ----------
   redis:
@@ -56,28 +83,153 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - backend-net
 
-  # ---------- Celery Worker ----------
-  celery-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: edtech-celery-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info
-    env_file:
-      - .env
+  # ======================== JITSI MEET ========================
+
+  # ---------- Jitsi Web (Nginx frontend) ----------
+  jitsi-web:
+    image: jitsi/web:stable-9823
+    container_name: edtech-jitsi-web
+    ports:
+      - "${JITSI_HTTPS_PORT:-8443}:443"
+      - "${JITSI_HTTP_PORT:-8080}:80"
     environment:
-      DATABASE_URL: postgresql://edtech:edtech_secret@postgres:5432/edtech_db
-      REDIS_URL: redis://redis:6379/0
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - JWT_APP_ID=${JITSI_APP_ID:-edtech-doubt-resolution}
+      - JWT_APP_SECRET=${JITSI_SECRET:-change-me-to-a-jitsi-secret-in-production}
+      - JWT_ACCEPTED_ISSUERS=${JITSI_APP_ID:-edtech-doubt-resolution}
+      - JWT_ACCEPTED_AUDIENCES=${JITSI_APP_ID:-edtech-doubt-resolution}
+      - XMPP_SERVER=jitsi-prosody
+      - XMPP_BOSH_URL_BASE=http://jitsi-prosody:5280
+      - JICOFO_AUTH_USER=focus
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - PUBLIC_URL=https://${JITSI_HOST:-127.0.0.1}:${JITSI_HTTPS_PORT:-8443}
+      - TZ=${TZ:-UTC}
+      - ENABLE_XMPP_WEBSOCKET=1
+      - ENABLE_COLIBRI_WEBSOCKET=1
+      - JVB_COLIBRI_WS_URL=ws://jitsi-jvb:9090
     volumes:
-      - .:/app
+      - jitsi-web-config:/config
+      - jitsi-web-crontabs:/var/spool/cron/crontabs
+      - jitsi-transcripts:/usr/share/jitsi-meet/transcripts
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - jitsi-prosody
     restart: unless-stopped
+    networks:
+      jitsi-net:
+        aliases:
+          - meet.jitsi
+
+  # ---------- Prosody (XMPP + JWT auth) ----------
+  jitsi-prosody:
+    image: jitsi/prosody:stable-9823
+    container_name: edtech-jitsi-prosody
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - JWT_APP_ID=${JITSI_APP_ID:-edtech-doubt-resolution}
+      - JWT_APP_SECRET=${JITSI_SECRET:-change-me-to-a-jitsi-secret-in-production}
+      - JWT_ACCEPTED_ISSUERS=${JITSI_APP_ID:-edtech-doubt-resolution}
+      - JWT_ACCEPTED_AUDIENCES=${JITSI_APP_ID:-edtech-doubt-resolution}
+      - JWT_ALLOW_EMPTY=0
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - XMPP_GUEST_DOMAIN=guest.meet.jitsi
+      - XMPP_RECORDER_DOMAIN=recorder.meet.jitsi
+      - XMPP_CROSS_DOMAIN=true
+      - JICOFO_AUTH_USER=focus
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD:-jicofo_pass_123}
+      - JICOFO_COMPONENT_SECRET=${JICOFO_COMPONENT_SECRET:-jicofo_component_123}
+      - JVB_AUTH_USER=jvb
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD:-jvb_pass_123}
+      - TZ=${TZ:-UTC}
+      - ENABLE_XMPP_WEBSOCKET=1
+    volumes:
+      - jitsi-prosody-config:/config
+      - jitsi-prosody-plugins:/prosody-plugins-custom
+    restart: unless-stopped
+    networks:
+      jitsi-net:
+        aliases:
+          - jitsi-prosody
+
+  # ---------- Jicofo (Focus component) ----------
+  jitsi-jicofo:
+    image: jitsi/jicofo:stable-9823
+    container_name: edtech-jitsi-jicofo
+    environment:
+      - XMPP_SERVER=jitsi-prosody
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - JICOFO_AUTH_USER=focus
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD:-jicofo_pass_123}
+      - JICOFO_COMPONENT_SECRET=${JICOFO_COMPONENT_SECRET:-jicofo_component_123}
+      - AUTH_TYPE=jwt
+      - TZ=${TZ:-UTC}
+    volumes:
+      - jitsi-jicofo-config:/config
+    depends_on:
+      - jitsi-prosody
+    restart: unless-stopped
+    networks:
+      - jitsi-net
+
+  # ---------- JVB (Video bridge) ----------
+  jitsi-jvb:
+    image: jitsi/jvb:stable-9823
+    container_name: edtech-jitsi-jvb
+    ports:
+      - "${JVB_PORT:-10000}:10000/udp"
+      - "9090:9090"
+    environment:
+      - XMPP_SERVER=jitsi-prosody
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - JVB_AUTH_USER=jvb
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD:-jvb_pass_123}
+      - JVB_PORT=${JVB_PORT:-10000}
+      - JVB_ADVERTISE_IPS=${JVB_ADVERTISE_IPS:-127.0.0.1}
+      - JVB_DISABLE_STUN=true
+      - JVB_STUN_SERVERS=
+      - ENABLE_COLIBRI_WEBSOCKET=1
+      - JVB_WS_DOMAIN=${JITSI_HOST:-127.0.0.1}:${JITSI_HTTPS_PORT:-8443}
+      - JVB_WS_SERVER_ID=jvb
+      - TZ=${TZ:-UTC}
+    volumes:
+      - jitsi-jvb-config:/config
+    depends_on:
+      - jitsi-prosody
+    restart: unless-stopped
+    networks:
+      jitsi-net:
+        aliases:
+          - jvb
 
 volumes:
   pgdata:
   redisdata:
+  jitsi-web-config:
+  jitsi-web-crontabs:
+  jitsi-transcripts:
+  jitsi-prosody-config:
+  jitsi-prosody-plugins:
+  jitsi-jicofo-config:
+  jitsi-jvb-config:
+
+networks:
+  backend-net:
+    driver: bridge
+  jitsi-net:
+    driver: bridge

@@ -13,6 +13,8 @@ class NotificationType(str, enum.Enum):
     session_accepted = "session_accepted"
     session_rejected = "session_rejected"
     session_completed = "session_completed"
+    substitute_proposed = "substitute_proposed"
+    rating_reminder = "rating_reminder"
     payment_received = "payment_received"
     withdrawal_processed = "withdrawal_processed"
     general = "general"

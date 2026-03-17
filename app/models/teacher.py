@@ -18,6 +18,7 @@ class TeacherProfile(TimestampMixin, Base):
     )
     bio: Mapped[str | None] = mapped_column(String(1000))
     per_30_mins_charges: Mapped[int | None] = mapped_column(Integer)
+    group_per_student_charges: Mapped[int | None] = mapped_column(Integer)
     upi_id: Mapped[str | None] = mapped_column(String(255))
 
     user: Mapped["User"] = relationship(back_populates="teacher_profile")

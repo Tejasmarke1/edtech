@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 class TeacherProfileUpdate(BaseModel):
     bio: str | None = Field(None, max_length=1000)
     per_30_mins_charges: int | None = Field(None, ge=0)
+    group_per_student_charges: int | None = Field(None, ge=0)
     upi_id: str | None = Field(None, max_length=255)
 
 
@@ -16,6 +17,7 @@ class TeacherProfileRead(BaseModel):
     user_name: str
     bio: str | None = None
     per_30_mins_charges: int | None = None
+    group_per_student_charges: int | None = None
     upi_id: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -54,3 +56,8 @@ class TeacherVideoRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class TeacherVideoAccessRead(BaseModel):
+    id: str
+    video_url: str

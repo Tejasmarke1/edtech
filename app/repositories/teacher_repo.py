@@ -84,6 +84,10 @@ def get_videos_for_subject(db: Session, user_name: str, sub_id: str) -> list[Tea
     )
 
 
+def get_video_by_id(db: Session, video_id: str) -> TeacherVideoDemo | None:
+    return db.query(TeacherVideoDemo).filter(TeacherVideoDemo.id == video_id).first()
+
+
 def add_video_demo(db: Session, user_name: str, sub_id: str, video_url: str, duration_seconds: int) -> TeacherVideoDemo:
     video = TeacherVideoDemo(
         id=str(uuid.uuid4()),

@@ -5,7 +5,7 @@ from typing import Generic, TypeVar
 from fastapi import Query
 from pydantic import BaseModel
 
-T = TypeVar("T")
+T = TypeVar("T")    
 
 
 class PaginationParams:

@@ -80,6 +80,10 @@ class User(TimestampMixin, Base):
         cascade="all, delete-orphan",
         foreign_keys="Withdrawal.teacher_id",
     )
+    group_enrollments: Mapped[list["SessionEnrollment"]] = relationship(
+        back_populates="student",
+        foreign_keys="SessionEnrollment.student_id",
+    )
 
     def __repr__(self) -> str:
         return f"<User {self.user_name} role={self.role.value}>"

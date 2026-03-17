@@ -440,7 +440,110 @@ Withdrawal    →  via teacher_profile.upi_id, tracked in withdrawal table
 
 ---
 
-## Phase 10 — Video Calling Integration (Research)
+## Phase 10 — Group Session Support (Many-to-One)
+
+### 10.1 Overview
+
+Extend the platform to support both session types without breaking existing one-to-one sessions:
+
+| Aspect | Individual (1:1) | Group (many:1) |
+|---|---|---|
+| Initiator | Student | **Teacher** |
+| `session_schedule.student_id` | Populated | `NULL` |
+| Enrollment | Implicit | New `session_enrollment` table |
+| Pricing | `per_30_mins_charges` | `group_per_student_charges × enrolled_count` |
+| Status flow | `Requested → Accepted → Completed` | `Open → Accepted → Completed` |
+
+### 10.2 New Database Table: `session_enrollment`
+
+| Attribute | Datatype | Key | Description |
+|---|---|---|---|
+| `id` | VARCHAR | **PK** | Unique enrollment ID |
+| `session_id` | VARCHAR | **FK → session_schedule.id** | The group session |
+| `student_id` | VARCHAR | **FK → user.user_name** | Enrolled student |
+| `status` | ENUM(`enrolled`, `cancelled`) | — | Enrollment status |
+
+> **Constraint:** `UNIQUE(session_id, student_id)` — one slot per student per session.
+
+### 10.3 Schema Changes to Existing Tables
+
+**`session_schedule`** — two new columns; `student_id` becomes nullable:
+
+| Change | Description |
+|---|---|
+| `session_type` | ENUM(`individual`, `group`) DEFAULT `individual` |
+| `max_students` | INTEGER nullable — capacity for group sessions |
+| `student_id` | Now **nullable** (NULL for group sessions) |
+
+**`teacher_profile`** — one new column:
+
+| Change | Description |
+|---|---|
+| `group_per_student_charges` | INTEGER nullable — per-student price for group sessions |
+
+### 10.4 Group Session Lifecycle
+
+```
+Teacher creates group session
+          ↓
+       [Open]  ──── Students enroll ────► capacity reached or teacher starts
+          ↓
+      [Accepted]
+          ↓
+   Teacher completes  (wallet credited: group_per_student_charges × enrolled_count)
+          ↓
+     [Completed]
+```
+
+Students can cancel their enrollment any time before the session starts.
+
+### 10.5 New APIs — Group Sessions
+
+#### Teacher: publish group session
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/sessions/group` | Teacher | Create a group session (subject, slot, date, max_students, topic) |
+| GET | `/api/v1/sessions/group/my` | Teacher | List own group sessions |
+
+#### Student: discover & enroll
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/sessions/group/available` | Student | Browse open group sessions (filter by subject) |
+| POST | `/api/v1/sessions/{id}/enroll` | Student | Enroll in a group session |
+| DELETE | `/api/v1/sessions/{id}/enroll` | Student | Cancel enrollment |
+
+#### Shared: enrollments view
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/sessions/{id}/enrollments` | Teacher/Enrolled Student | View enrolled students + count |
+
+### 10.6 Join Logic (Unified)
+
+`GET /api/v1/sessions/{id}/join` already exists. Extended to handle group sessions:
+- **Individual**: participant must be the teacher or the specific student_id
+- **Group**: participant must be the teacher OR any student with `status=enrolled`
+
+### 10.7 Business Rules
+
+| Rule | Where enforced |
+|---|---|
+| Only teachers can create group sessions | `require_teacher` dependency |
+| Student cannot enroll twice | `UNIQUE(session_id, student_id)` + service check |
+| Cannot enroll if at capacity | `enrollment_repo.get_active_enrollment_count` |
+| Cannot enroll in past/non-open sessions | Service validate `status == Open` |
+| Wallet credit = `group_per_student_charges × active_enrollments` | `complete_session` in service |
+| Existing individual sessions are unaffected | `session_type` defaults to `individual` |
+
+### 10.8 Migration
+
+New Alembic migration (`_add_group_session_support`):
+1. Add `session_type`, `max_students` to `session_schedule`; alter `student_id` to nullable
+2. Add `group_per_student_charges` to `teacher_profile`
+3. Create `session_enrollment` table with unique constraint
+
+---
+
+## Phase 11 — Video Calling Integration (Research)
 
 ### 10.1 Jitsi Integration (Proposed)
 
@@ -492,13 +595,14 @@ Withdrawal    →  via teacher_profile.upi_id, tracked in withdrawal table
 | 6 | ~~Auth module (register, login, JWT)~~ | ✅ Done |
 | 7 | ~~Teacher module (profile, subjects, videos, availability)~~ | ✅ Done |
 | 8 | ~~Student module (profile, search)~~ | ✅ Done |
-| 9 | Session scheduling (full flow) | ⬜ Next |
-| 10 | ⬜ |
-| 11 | Ratings | ⬜ | Notifications |
-| 12 | Payments & earnings | ⬜ |
-| 13 | Jitsi integration | ⬜ |
-| 14 | Tests | ⬜ |
-| 15 | Deployment config | ⬜ |
+| 9 | ~~Session scheduling (full flow)~~ | ✅ Done |
+| 10 | ~~Notifications~~ | ✅ Done |
+| 11 | ~~Ratings~~ | ✅ Done |
+| 12 | ~~Payments & earnings~~ | ✅ Done |
+| 13 | ~~Jitsi integration~~ | ✅ Done |
+| 14 | ~~Group session support (Phase 10)~~ — models, enrollment repo, service, routes, migration | ✅ Done |
+| 15 | Tests | ⬜ |
+| 16 | Deployment config | ⬜ |
 
 ---
 

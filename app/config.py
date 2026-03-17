@@ -1,5 +1,6 @@
 """Application settings loaded from environment variables."""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,37 +14,54 @@ class Settings(BaseSettings):
     )
 
     # ---------- App ----------
-    APP_NAME: str = "edtech-doubt-resolution"
-    APP_ENV: str = "development"
-    APP_PORT: int = 8000
-    DEBUG: bool = True
+    APP_NAME: str = Field(...)
+    APP_ENV: str = Field(...)
+    APP_PORT: int = Field(...)
+    DEBUG: bool = Field(...)
 
     # ---------- PostgreSQL ----------
-    POSTGRES_USER: str = "edtech"
-    POSTGRES_PASSWORD: str = "edtech_secret"
-    POSTGRES_DB: str = "edtech_db"
-    POSTGRES_HOST: str = "postgres"
-    POSTGRES_PORT: int = 5432
-    DATABASE_URL: str = (
-        "postgresql://edtech:edtech_secret@postgres:5432/edtech_db"
-    )
+    POSTGRES_USER: str = Field(...)
+    POSTGRES_PASSWORD: str = Field(...)
+    POSTGRES_DB: str = Field(...)
+    POSTGRES_HOST: str = Field(...)
+    POSTGRES_PORT: int = Field(...)
+    DATABASE_URL: str = Field(...)
 
     # ---------- Redis ----------
-    REDIS_HOST: str = "redis"
-    REDIS_PORT: int = 6379
-    REDIS_URL: str = "redis://redis:6379/0"
+    REDIS_HOST: str = Field(...)
+    REDIS_PORT: int = Field(...)
+    REDIS_URL: str = Field(...)
 
     # ---------- JWT / Auth ----------
-    SECRET_KEY: str = "change-me-to-a-random-secret-key-in-production"
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    SECRET_KEY: str = Field(...)
+    ALGORITHM: str = Field(...)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(...)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(...)
+
+    # ---------- Payments ----------
+    # Fixed charge paid by each user consuming the platform (student/enrollee). 
+    PLATFORM_CHARGE_PER_USER: int = Field(...)
+    # Percentage deducted from teacher earnings on each successful transaction.
+    COMMISSION_PERCENT: float = Field(...)
+    # Per-session-type overrides (defaults match legacy values).
+    PLATFORM_CHARGE_PER_USER_INDIVIDUAL: int = Field(...)
+    PLATFORM_CHARGE_PER_USER_GROUP: int = Field(...)
+    COMMISSION_PERCENT_INDIVIDUAL: float = Field(...)
+    COMMISSION_PERCENT_GROUP: float = Field(...)
+    PAYMENT_GATEWAY: str = Field(...)
+    PAYMENT_CURRENCY: str = Field(...)
+    PAYMENT_GATEWAY_KEY_ID: str = Field(...)
+    PAYMENT_GATEWAY_KEY_SECRET: str = Field(...)
+    PAYMENT_WEBHOOK_SECRET: str = Field(...)
+
+    # ---------- Jitsi ----------
+    JITSI_URL: str = Field(...)
+    JITSI_APP_ID: str = Field(...)
+    JITSI_SECRET: str = Field(...)
+    JITSI_DOMAIN: str = Field(...)
 
     # ---------- CORS ----------
-    CORS_ORIGINS: list[str] = [
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ]
+    CORS_ORIGINS: list[str] = Field(...)
 
 
 # Singleton — import this wherever settings are needed.

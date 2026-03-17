@@ -1,6 +1,6 @@
 """Teacher router — profile, subjects, videos, availability, earnings."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db, require_teacher
@@ -12,9 +12,10 @@ from app.schemas.teacher import (
     TeacherProfileRead,
     TeacherProfileUpdate,
     TeacherSubjectRead,
+    TeacherVideoAccessRead,
     TeacherVideoRead,
 )
-from app.schemas.wallet import WalletRead, WithdrawalRead, WithdrawalRequest
+from app.schemas.wallet import MonthlyEarningsRead, WalletRead, WithdrawalRead, WithdrawalRequest
 from app.services import teacher_service
 from app.utils.pagination import Page, PaginationParams
 
@@ -113,6 +114,15 @@ def add_video(
     return teacher_service.add_video(db, user, sub_id, payload)
 
 
+@router.get("/videos/{video_id}/access-url", response_model=TeacherVideoAccessRead)
+def get_video_access_url(
+    video_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_teacher),
+):
+    return teacher_service.get_video_access_url(db, user, video_id)
+
+
 # ==================== Availability ====================
 @router.get("/availability", response_model=Page[AvailabilitySlotRead])
 def get_availability(
@@ -160,6 +170,16 @@ def get_earnings(
     user: User = Depends(require_teacher),
 ):
     return teacher_service.get_earnings(db, user)
+
+
+@router.get("/earnings/monthly", response_model=MonthlyEarningsRead)
+def get_monthly_earnings(
+    year: int = Query(..., ge=2020, le=2100),
+    month: int = Query(..., ge=1, le=12),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_teacher),
+):
+    return teacher_service.get_monthly_earnings(db, user, year, month)
 
 
 @router.post("/withdrawals", response_model=WithdrawalRead, status_code=201)
