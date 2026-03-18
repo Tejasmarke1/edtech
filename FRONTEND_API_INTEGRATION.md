@@ -5,8 +5,8 @@ This guide is for frontend developers consuming the EdTech backend APIs when bac
 ## 1. Backend Image Tags
 
 Current built tags:
-- `tejasmarke1/edtech-backend:latest`
-- `tejasmarke1/edtech-backend:ebf8412`
+- `tejasmarke/edtech-backend:latest`
+- `tejasmarke/edtech-backend:ebf8412`
 
 Use commit tag (`ebf8412`) for stable testing.
 
@@ -64,7 +64,7 @@ docker run -d --name edtech-backend \
   -e JITSI_SECRET=replace_jitsi_secret \
   -e JITSI_DOMAIN=meet.jitsi \
   -e CORS_ORIGINS='["http://localhost:3000","http://localhost:5173"]' \
-  tejasmarke1/edtech-backend:ebf8412
+  tejasmarke/edtech-backend:ebf8412
 ```
 
 Health check:
