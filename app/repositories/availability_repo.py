@@ -27,6 +27,26 @@ def get_slot_by_id(db: Session, slot_id: str) -> AvailabilitySlot | None:
     return db.query(AvailabilitySlot).filter(AvailabilitySlot.id == slot_id).first()
 
 
+def get_active_slot_for_teacher_time(
+    db: Session,
+    user_name: str,
+    day_of_week: str,
+    start_time: str,
+    end_time: str,
+) -> AvailabilitySlot | None:
+    return (
+        db.query(AvailabilitySlot)
+        .filter(
+            AvailabilitySlot.user_name == user_name,
+            AvailabilitySlot.day_of_week == day_of_week,
+            AvailabilitySlot.start_time == start_time,
+            AvailabilitySlot.end_time == end_time,
+            AvailabilitySlot.is_active.is_(True),
+        )
+        .first()
+    )
+
+
 def create_slot(db: Session, user_name: str, day_of_week: str, start_time: str, end_time: str) -> AvailabilitySlot:
     slot = AvailabilitySlot(
         id=str(uuid.uuid4()),

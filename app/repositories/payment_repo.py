@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import extract
+from sqlalchemy import extract, or_
 from sqlalchemy.orm import Session
 
 from app.models.payment import (
@@ -80,6 +80,41 @@ def get_transaction_by_gateway_order_id(
             PaymentTransaction.gateway == gateway,
             PaymentTransaction.gateway_order_id == gateway_order_id,
         )
+        .first()
+    )
+
+
+def get_latest_transaction_for_session_payer(
+    db: Session,
+    *,
+    session_id: str,
+    payer_id: str,
+) -> PaymentTransaction | None:
+    return (
+        db.query(PaymentTransaction)
+        .filter(
+            PaymentTransaction.session_id == session_id,
+            PaymentTransaction.payer_id == payer_id,
+        )
+        .order_by(PaymentTransaction.created_at.desc())
+        .first()
+    )
+
+
+def get_captured_transaction_for_session_payer(
+    db: Session,
+    *,
+    session_id: str,
+    payer_id: str,
+) -> PaymentTransaction | None:
+    return (
+        db.query(PaymentTransaction)
+        .filter(
+            PaymentTransaction.session_id == session_id,
+            PaymentTransaction.payer_id == payer_id,
+            PaymentTransaction.status == PaymentStatus.captured,
+        )
+        .order_by(PaymentTransaction.created_at.desc())
         .first()
     )
 
@@ -172,3 +207,51 @@ def get_monthly_captured_earnings(
         "sessions_completed": len(items),
         "amount_earned": sum(i.net_payout for i in items),
     }
+
+
+def get_transactions_for_user(
+    db: Session, user_name: str, *, skip: int = 0, limit: int = 20
+) -> tuple[list[PaymentTransaction], int]:
+    base_query = db.query(PaymentTransaction).filter(
+        or_(
+            PaymentTransaction.payer_id == user_name,
+            PaymentTransaction.payee_id == user_name,
+        )
+    )
+    total = base_query.count()
+    items = (
+        base_query.order_by(PaymentTransaction.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return items, total
+
+
+def get_latest_payment_status_for_sessions(
+    db: Session,
+    user_name: str,
+    session_ids: list[str],
+) -> dict[str, PaymentStatus]:
+    if not session_ids:
+        return {}
+
+    rows = (
+        db.query(PaymentTransaction)
+        .filter(
+            PaymentTransaction.session_id.in_(session_ids),
+            or_(
+                PaymentTransaction.payer_id == user_name,
+                PaymentTransaction.payee_id == user_name,
+            ),
+        )
+        .order_by(PaymentTransaction.created_at.desc())
+        .all()
+    )
+
+    status_map: dict[str, PaymentStatus] = {}
+    for tx in rows:
+        if tx.session_id in status_map:
+            continue
+        status_map[tx.session_id] = tx.status
+    return status_map

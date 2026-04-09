@@ -2,11 +2,17 @@
 
 from sqlalchemy.orm import Session
 
+from app.models.enrollment import EnrollmentStatus
 from app.models.notification import NotificationType
-from app.models.session import SessionStatus
-from app.models.user import User
-from app.repositories import rating_repo, session_repo
-from app.schemas.rating import PendingRatingRead, RatingCreate
+from app.models.session import SessionStatus, SessionType
+from app.models.user import User, UserRole
+from app.repositories import enrollment_repo, rating_repo, session_repo
+from app.schemas.rating import (
+    PendingRatingRead,
+    RatingCreate,
+    RatingHistoryItem,
+    RatingHistoryRead,
+)
 from app.services import notification_service
 from app.utils.exceptions import BadRequestError, NotFoundError
 
@@ -19,8 +25,15 @@ def submit_rating(db: Session, user: User, payload: RatingCreate):
     if session.status != SessionStatus.completed:
         raise BadRequestError("Can only rate completed sessions")
 
-    # User must be a participant
-    if session.teacher_id != user.user_name and session.student_id != user.user_name:
+    if user.role != UserRole.student:
+        raise BadRequestError("Only students can submit ratings")
+
+    # Student must be a valid participant of this completed session.
+    if session.session_type == SessionType.group:
+        enrollment = enrollment_repo.get_enrollment(db, session.id, user.user_name)
+        if not enrollment or enrollment.status != EnrollmentStatus.enrolled:
+            raise NotFoundError("Session not found")
+    elif session.student_id != user.user_name:
         raise NotFoundError("Session not found")
 
     # Prevent duplicate rating
@@ -38,12 +51,8 @@ def submit_rating(db: Session, user: User, payload: RatingCreate):
         review_text=payload.review_text,
     )
 
-    # Notify the other party
-    other_user = (
-        session.student_id
-        if user.user_name == session.teacher_id
-        else session.teacher_id
-    )
+    # Notify teacher when student submits a rating.
+    other_user = session.teacher_id
     notification_service.create_notification(
         db,
         user_name=other_user,
@@ -68,3 +77,31 @@ def get_pending_ratings(db: Session, user: User) -> list[PendingRatingRead]:
         )
         for s in sessions
     ]
+
+
+def get_rating_history(db: Session, user: User) -> RatingHistoryRead:
+    given_ratings = rating_repo.get_ratings_given_by_user(db, user.user_name)
+    received_ratings = rating_repo.get_ratings_received_by_user(db, user.user_name)
+
+    def _map_rating(rating, direction: str) -> RatingHistoryItem:
+        session = rating.session
+        counterpart = (
+            session.student_id
+            if user.user_name == session.teacher_id
+            else session.teacher_id
+        )
+        return RatingHistoryItem(
+            session_id=rating.session_id,
+            counterpart_user_name=counterpart,
+            stars=rating.stars,
+            review_text=rating.review_text,
+            session_date=session.session_date,
+            topic_description=session.topic_description,
+            created_at=rating.created_at,
+            direction=direction,
+        )
+
+    return RatingHistoryRead(
+        given=[_map_rating(rating, "given") for rating in given_ratings],
+        received=[_map_rating(rating, "received") for rating in received_ratings],
+    )

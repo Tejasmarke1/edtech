@@ -18,6 +18,7 @@ env/
 # Environment variables
 .env
 !.env.example
+.env.*
 
 # Distribution / packaging
 dist/
@@ -36,6 +37,32 @@ Thumbs.db
 htmlcov/
 .coverage
 coverage.xml
+
+# Python tool caches
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Frontend dependencies and build outputs
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.vite/
+
+# Browser/E2E artifacts
+playwright-report/
+test-results/
+
+# Local runtime uploads/storage
+uploads/
+uploaded_media/
+
+# Local databases and temp files
+*.db
+*.sqlite
+*.sqlite3
+*.tmp
+*.temp
 
 # Docker
 *.log

@@ -1,6 +1,6 @@
-"""Teacher router — profile, subjects, videos, availability, earnings."""
+"""Teacher router — profile, subjects, videos, uploads, availability, earnings."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.dependencies import get_db, require_teacher
@@ -9,6 +9,11 @@ from app.schemas.availability import AvailabilitySlotCreate, AvailabilitySlotRea
 from app.schemas.teacher import (
     AddSubjectRequest,
     AddVideoRequest,
+    CompleteOnboardingResponse,
+    CreateVideoUploadRequest,
+    CreateVideoUploadResponse,
+    FinalizeVideoUploadRequest,
+    FinalizeVideoUploadResponse,
     TeacherProfileRead,
     TeacherProfileUpdate,
     TeacherSubjectRead,
@@ -16,7 +21,7 @@ from app.schemas.teacher import (
     TeacherVideoRead,
 )
 from app.schemas.wallet import MonthlyEarningsRead, WalletRead, WithdrawalRead, WithdrawalRequest
-from app.services import teacher_service
+from app.services import teacher_service, video_upload_service
 from app.utils.pagination import Page, PaginationParams
 
 router = APIRouter()
@@ -123,6 +128,41 @@ def get_video_access_url(
     return teacher_service.get_video_access_url(db, user, video_id)
 
 
+@router.post("/uploads/create", response_model=CreateVideoUploadResponse)
+def create_video_upload_url(
+    payload: CreateVideoUploadRequest,
+    user: User = Depends(require_teacher),
+):
+    return video_upload_service.create_upload_session(
+        user=user,
+        filename=payload.filename,
+        content_type=payload.content_type,
+    )
+
+
+@router.put("/uploads/{upload_id}/binary", status_code=status.HTTP_204_NO_CONTENT)
+async def upload_video_binary(
+    upload_id: str,
+    request: Request,
+    user: User = Depends(require_teacher),
+):
+    body = await request.body()
+    video_upload_service.upload_binary(
+        upload_id=upload_id,
+        user=user,
+        payload=body,
+        content_type=request.headers.get("content-type"),
+    )
+
+
+@router.post("/uploads/finalize", response_model=FinalizeVideoUploadResponse)
+def finalize_video_upload(
+    payload: FinalizeVideoUploadRequest,
+    user: User = Depends(require_teacher),
+):
+    return video_upload_service.finalize_upload(payload.upload_id, user)
+
+
 # ==================== Availability ====================
 @router.get("/availability", response_model=Page[AvailabilitySlotRead])
 def get_availability(
@@ -199,4 +239,17 @@ def get_withdrawals(
 ):
     return teacher_service.get_withdrawal_history(
         db, user, skip=pagination.skip, limit=pagination.limit
+    )
+
+
+@router.post("/onboarding/complete", response_model=CompleteOnboardingResponse)
+def complete_onboarding(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_teacher),
+):
+    # Keep completion idempotent for retry-safe frontend submissions.
+    teacher_service.get_profile(db, user)
+    return CompleteOnboardingResponse(
+        success=True,
+        message="Onboarding completed successfully",
     )

@@ -2,9 +2,10 @@
 
 import uuid
 
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.models.enrollment import EnrollmentStatus, SessionEnrollment
 from app.models.rating import Rating
 from app.models.session import SessionSchedule, SessionStatus
 
@@ -42,10 +43,19 @@ def get_rating_by_user_and_session(
 def get_pending_sessions_for_rating(
     db: Session, user_name: str
 ) -> list[SessionSchedule]:
-    """Return completed sessions where the user participated but hasn't rated yet."""
+    """Return completed sessions where a student participated but hasn't rated yet."""
     rated_session_ids = (
         db.query(Rating.session_id)
         .filter(Rating.rated_by == user_name)
+        .subquery()
+    )
+
+    enrolled_group_session_ids = (
+        db.query(SessionEnrollment.session_id)
+        .filter(
+            SessionEnrollment.student_id == user_name,
+            SessionEnrollment.status == EnrollmentStatus.enrolled,
+        )
         .subquery()
     )
 
@@ -56,9 +66,35 @@ def get_pending_sessions_for_rating(
             or_(
                 SessionSchedule.teacher_id == user_name,
                 SessionSchedule.student_id == user_name,
+                SessionSchedule.id.in_(db.query(enrolled_group_session_ids.c.session_id)),
             ),
             SessionSchedule.id.notin_(db.query(rated_session_ids.c.session_id)),
+            SessionSchedule.teacher_id != user_name,
         )
         .order_by(SessionSchedule.session_date.desc())
+        .all()
+    )
+
+
+def get_ratings_given_by_user(db: Session, user_name: str) -> list[Rating]:
+    return (
+        db.query(Rating)
+        .join(SessionSchedule, SessionSchedule.id == Rating.session_id)
+        .filter(Rating.rated_by == user_name)
+        .order_by(Rating.created_at.desc())
+        .all()
+    )
+
+
+def get_ratings_received_by_user(db: Session, user_name: str) -> list[Rating]:
+    return (
+        db.query(Rating)
+        .join(SessionSchedule, SessionSchedule.id == Rating.session_id)
+        .filter(
+            SessionSchedule.status == SessionStatus.completed,
+            SessionSchedule.teacher_id == user_name,
+            Rating.rated_by != user_name,
+        )
+        .order_by(Rating.created_at.desc())
         .all()
     )

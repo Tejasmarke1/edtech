@@ -1,0 +1,100 @@
+﻿Requirement Document
+
+Basic Discussion:
+  
+
+Functional Requirements:
+(As Teacher)
+1. Teacher can login to the website
+2. Teachers can create an account for themselves and choose 5 subjects in which they can show themselves as Subject Matter Expert (SME). [a]
+3. Teacher should add atleast two 5 minute videos teaching for that particular subject in which they are saying that they are SME. Or one 10 minute video. This will be shown in their profile.
+4. They can provide a timeline in which they will be active to teach.
+5. Teacher should receive a notification about the session scheduling from the student. They can Accept, Reject or provide an alternate timing for this session
+6. If teacher has accepted then, a session will be scheduled of that timing in My Session tab of teacher. Also, teachers calendar will be blocked in this time period (He will be marked busy/in a session). Same will happen if the student have accepted the substitute timing proposed by the teacher.
+7. In My session tab, there is a button of Join Session using which teacher can join the session.
+8. Once that session is over and teacher comes back to the app the very next time, there will be a pop-up to give star rating to the student whom this teacher has taught in the last session.
+9. My session tab will maintain history of sessions taken by this teacher.
+{The session is over}
+10. The profile of this teacher will be upgraded for the following things: 
+A. Rating will be upgraded
+B. Number of sessions taken
+C. The amount earned by the teacher will increase
+   11. There should be a section of total earning for the teacher, where we can show amount earned until now, amount withdrawal, and monthly filter to check for monthy earning and withdrawal. This will have an active withdrawal button with an amount field so that teacher can withdraw the amount from there only.
+
+
+(As Student)
+   12. Student can login to the website
+   13. Student can create their account in the website
+   14. Student can search for a particular topic
+
+
+   15. They should see teachers available to teach that topic, along with their active timings and pricing.
+   16. Student can choose a button to schedule a call with any teacher. This pop-up should have an question of what exactly they are looking for.
+   17. If teacher have accepted the notification, then in the My Session tab of Student a session should be shown as per the schedule timings.
+   18. If teacher has rejected the notification, then a pop-up should appear that this teacher is not available. Please try after some time or choose any other teacher.
+   19. If teacher has sent a substitute timing, then a pop-up should appear with the accept and reject button for the student.
+   20. If accepted, a session will be shown in the My Session tabs.
+   21. If Rejected, nothing happens.
+   22. In My session tab, there is a join session button using which student can join the session with the teacher.
+   23. Once the session is over and student comes to the Website next time, they will see this pop-up about rating that teacher and session.
+   24. My Session tab will maintain history of sessions taken by the student.
+{The session is over}
+   25. The profile of this student will be upgraded for the following parameters:
+A. Rating of this student
+B. Number of sessions attended until today
+   26. Optional thing from the POV of user to show a mockup of payment.
+
+
+Payment:
+      1. Platform Charges: This is the charge that is paid by the person who is utilising our platform for making.
+      2. Commission Charge: This is the charge that is paid on each successful transaction. Ideally it is deducted from the payment made to the person making money (teacher)
+
+
+Screens:
+      1. Home: 
+      2. Search Screen: where results of each search will appear
+      3. My Session Screen: This will maintain history of sessions taken and planned sessions 
+      4. Profile Screen: Showing basic details including rating and revenue
+
+
+Point of Research:
+      1. Need to check if Google meet can be integrated in our website only. So, that user don’t have to switch the tab. Also, they can use few other tools while they are on the meet, like digital drawing board to understand a topic better, or they can have a youtube video playing within the meet, or can share a PDF t        ype of thing, smart notes can be created by itself based on what was discussed in the meeting.
+      2. Proposed solution: Jitsi
+
+
+How to Start:
+Pranav: Backend 
+Guntiwar: Frontend
+Marke: AI/FE
+Gaurishankar: FE
+Sachin: UI Photos
+
+
+Step 1: 
+        A Data Modelling & Architecture Diagram
+        B UI/UX development
+
+
+Step 2: 
+        A Backend Team: Started working API creation
+        B Frontend Team: Started working on Screen Creation
+
+
+Step 3: 
+        API integration
+
+
+Step 4: Demonstration of your work
+
+
+Step 5: Recycling based on the Demo Feedbacks.
+
+
+Project completion and handover.
+
+
+
+
+References:
+      1. Astrotalk app: https://www.figma.com/proto/XK2pXQywvf6x7McljicPic/Astrotalk?node-id=518-1519&t=TXQvNJVdD9EK61lc-0&scaling=scale-down&content-scaling=fixed&page-id=2%3A230&starting-point-node-id=2%3A232&show-proto-sidebar=1 
+      2. [a]I guess along with subject we should have the topics as well here, like subject : DSA, topics : Stack, Queue, etc. This defines the teachers quality in more details and also provides a better option for dev to search, here we can search with related topics.

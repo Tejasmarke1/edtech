@@ -13,7 +13,6 @@ from app.config import settings
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # — Startup —
-    # (Connection pools are created lazily by SQLAlchemy; nothing else needed yet.)
     yield
     # — Shutdown —
     from app.database import engine
@@ -32,8 +31,8 @@ app = FastAPI(
 # ---------- CORS ----------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -54,6 +53,7 @@ from app.routers import (  # noqa: E402
     ratings,
     search,
     sessions,
+    subjects,
     students,
     teachers,
 )
@@ -61,6 +61,7 @@ from app.routers import (  # noqa: E402
 API_V1 = "/api/v1"
 
 app.include_router(auth.router, prefix=f"{API_V1}/auth", tags=["Auth"])
+app.include_router(subjects.router, prefix=f"{API_V1}/subjects", tags=["Subjects"])
 app.include_router(teachers.router, prefix=f"{API_V1}/teachers", tags=["Teachers"])
 app.include_router(students.router, prefix=f"{API_V1}/students", tags=["Students"])
 app.include_router(sessions.router, prefix=f"{API_V1}/sessions", tags=["Sessions"])

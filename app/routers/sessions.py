@@ -151,6 +151,7 @@ def get_available_group_sessions(
     """Browse all open group sessions, optionally filtered by subject."""
     return session_service.get_open_group_sessions(
         db,
+        user,
         subject_id=subject_id,
         skip=pagination.skip,
         limit=pagination.limit,

@@ -1,14 +1,17 @@
 """Session service — scheduling, acceptance, status management, Jitsi rooms."""
 
+from datetime import datetime, timedelta
 import uuid
 
 from sqlalchemy.orm import Session
 
 from app.models.enrollment import EnrollmentStatus
 from app.models.notification import NotificationType
+from app.models.payment import PaymentStatus
+from app.models.availability import DayOfWeek
 from app.models.session import SessionSchedule, SessionStatus, SessionType
 from app.models.user import User, UserRole
-from app.repositories import availability_repo, enrollment_repo, session_repo, teacher_repo
+from app.repositories import availability_repo, enrollment_repo, payment_repo, session_repo, teacher_repo
 from app.schemas.session import EnrollmentRead, GroupSessionCreate, ProposeTimeRequest, SessionRead, SessionRequest
 from app.services import notification_service
 from app.utils.exceptions import BadRequestError, ForbiddenError, NotFoundError
@@ -38,6 +41,39 @@ def _get_session_or_404(db: Session, session_id: str) -> SessionSchedule:
     if not session:
         raise NotFoundError("Session not found")
     return session
+
+
+def _weekday_to_enum(value: int) -> DayOfWeek:
+    mapping = {
+        0: DayOfWeek.mon,
+        1: DayOfWeek.tue,
+        2: DayOfWeek.wed,
+        3: DayOfWeek.thu,
+        4: DayOfWeek.fri,
+        5: DayOfWeek.sat,
+        6: DayOfWeek.sun,
+    }
+    return mapping[value]
+
+
+def _ensure_within_scheduled_window(db: Session, session: SessionSchedule) -> None:
+    slot = availability_repo.get_slot_by_id(db, session.slot_id)
+    if not slot:
+        raise BadRequestError("Session slot details are unavailable")
+
+    start_clock = datetime.strptime(slot.start_time, "%H:%M").time()
+    end_clock = datetime.strptime(slot.end_time, "%H:%M").time()
+    session_start = datetime.combine(session.session_date, start_clock)
+    session_end = datetime.combine(session.session_date, end_clock)
+
+    if session_end <= session_start:
+        session_end += timedelta(days=1)
+
+    now = datetime.now()
+    if now < session_start or now > session_end:
+        raise BadRequestError(
+            f"You can join only during the scheduled class time ({slot.start_time}-{slot.end_time})"
+        )
 
 
 # ---------- Student: request session ----------
@@ -105,8 +141,53 @@ def get_my_sessions(
     items, total = session_repo.get_sessions_for_user(
         db, user.user_name, status=status, skip=skip, limit=limit
     )
+
+    session_ids = [s.id for s in items]
+    payment_status_map = payment_repo.get_latest_payment_status_for_sessions(
+        db,
+        user.user_name,
+        session_ids,
+    )
+
+    mapped_items: list[SessionRead] = []
+    slot_cache: dict[str, object] = {}
+    for s in items:
+        payment_status = payment_status_map.get(s.id)
+        slot = slot_cache.get(s.slot_id)
+        if slot is None:
+            slot = availability_repo.get_slot_by_id(db, s.slot_id)
+            slot_cache[s.slot_id] = slot
+        mapped_items.append(
+            SessionRead(
+                id=s.id,
+                teacher_id=s.teacher_id,
+                teacher_name=(s.teacher.profile.full_name if s.teacher and s.teacher.profile and s.teacher.profile.full_name else s.teacher_id),
+                student_id=s.student_id,
+                subject_master_id=s.subject_master_id,
+                subject_name=(s.subject_master.subject.name if s.subject_master and s.subject_master.subject else None),
+                topic_description=s.topic_description,
+                slot_id=s.slot_id,
+                slot_start_time=slot.start_time if slot else None,
+                slot_end_time=slot.end_time if slot else None,
+                session_date=s.session_date,
+                status=s.status,
+                session_type=s.session_type,
+                max_students=s.max_students,
+                meeting_link=s.meeting_link,
+                group_per_student_charges=(
+                    s.teacher.teacher_profile.group_per_student_charges
+                    if s.teacher and s.teacher.teacher_profile
+                    else None
+                ),
+                payment_status=payment_status.value if payment_status else None,
+                is_paid=payment_status == PaymentStatus.captured,
+                created_at=s.created_at,
+                updated_at=s.updated_at,
+            )
+        )
+
     return Page(
-        items=[SessionRead.model_validate(s) for s in items],
+        items=mapped_items,
         total=total,
         skip=skip,
         limit=limit,
@@ -297,6 +378,9 @@ def get_meeting_link(db: Session, user: User, session_id: str) -> dict:
     if session.status != SessionStatus.accepted:
         raise BadRequestError("Meeting link is only available for accepted sessions")
 
+    if session.session_type == SessionType.group:
+        _ensure_within_scheduled_window(db, session)
+
     if not session.meeting_link or not session.room_name:
         raise BadRequestError("No meeting room created for this session")
 
@@ -334,6 +418,9 @@ def create_room(db: Session, user: User, session_id: str) -> dict:
 
     if session.status != SessionStatus.accepted:
         raise BadRequestError("Room can only be created for accepted sessions")
+
+    if session.session_type == SessionType.group:
+        _ensure_within_scheduled_window(db, session)
 
     room_name, meeting_link = _generate_meeting_link()
 
@@ -407,14 +494,55 @@ def create_group_session(
     if not entry or entry.user_name != teacher.user_name or not entry.is_active:
         raise NotFoundError("Teacher does not teach this subject")
 
-    # Validate slot belongs to teacher and is active
-    slot = availability_repo.get_slot_by_id(db, payload.slot_id)
-    if not slot or slot.user_name != teacher.user_name or not slot.is_active:
-        raise NotFoundError("Availability slot not found for this teacher")
+    resolved_slot_id: str
+    resolved_session_date = payload.session_date
+
+    # Supports both legacy slot-based scheduling and custom datetime scheduling.
+    if payload.custom_start_at is not None:
+        duration = payload.duration_minutes or 60
+        start_at = payload.custom_start_at
+        end_at = start_at + timedelta(minutes=duration)
+
+        if end_at.date() != start_at.date():
+            raise BadRequestError("Class timing cannot cross midnight")
+
+        day_of_week = _weekday_to_enum(start_at.weekday())
+        start_time = start_at.strftime("%H:%M")
+        end_time = end_at.strftime("%H:%M")
+        resolved_session_date = start_at.date()
+
+        existing_slot = availability_repo.get_active_slot_for_teacher_time(
+            db,
+            teacher.user_name,
+            day_of_week,
+            start_time,
+            end_time,
+        )
+        if existing_slot:
+            resolved_slot_id = existing_slot.id
+        else:
+            slot = availability_repo.create_slot(
+                db,
+                teacher.user_name,
+                day_of_week,
+                start_time,
+                end_time,
+            )
+            resolved_slot_id = slot.id
+    else:
+        if not payload.slot_id or not payload.session_date:
+            raise BadRequestError("slot_id and session_date are required")
+
+        # Validate slot belongs to teacher and is active
+        slot = availability_repo.get_slot_by_id(db, payload.slot_id)
+        if not slot or slot.user_name != teacher.user_name or not slot.is_active:
+            raise NotFoundError("Availability slot not found for this teacher")
+        resolved_slot_id = payload.slot_id
+        resolved_session_date = payload.session_date
 
     # Prevent duplicate group session at same slot+date
     if session_repo.has_conflicting_session(
-        db, teacher.user_name, payload.slot_id, payload.session_date
+        db, teacher.user_name, resolved_slot_id, resolved_session_date
     ):
         raise BadRequestError(
             "You already have a session scheduled for the selected slot and date"
@@ -426,8 +554,8 @@ def create_group_session(
         db,
         teacher_id=teacher.user_name,
         subject_master_id=payload.subject_master_id,
-        slot_id=payload.slot_id,
-        session_date=payload.session_date,
+        slot_id=resolved_slot_id,
+        session_date=resolved_session_date,
         max_students=payload.max_students,
         topic_description=payload.topic_description,
         meeting_link=meeting_link,
@@ -543,6 +671,7 @@ def get_session_enrollments(
 # ---------- Student: browse open group sessions ----------
 def get_open_group_sessions(
     db: Session,
+    user: User,
     *,
     subject_id: str | None = None,
     skip: int = 0,
@@ -551,8 +680,77 @@ def get_open_group_sessions(
     items, total = session_repo.get_open_group_sessions(
         db, subject_id=subject_id, skip=skip, limit=limit
     )
+
+    mapped_items: list[SessionRead] = []
+    slot_cache: dict[str, object] = {}
+    now = datetime.now()
+    for session in items:
+        enrolled_count = enrollment_repo.get_active_enrollment_count(db, session.id)
+        seats_left = None
+        if session.max_students is not None:
+            seats_left = max(session.max_students - enrolled_count, 0)
+
+        slot = slot_cache.get(session.slot_id)
+        if slot is None:
+            slot = availability_repo.get_slot_by_id(db, session.slot_id)
+            slot_cache[session.slot_id] = slot
+
+        # Hide stale open sessions whose scheduled start time has already passed.
+        if not slot:
+            continue
+        try:
+            start_clock = datetime.strptime(slot.start_time, "%H:%M").time()
+            session_start = datetime.combine(session.session_date, start_clock)
+            if session_start < now:
+                continue
+        except ValueError:
+            continue
+
+        enrollment = enrollment_repo.get_enrollment(db, session.id, user.user_name)
+        is_enrolled = bool(
+            enrollment and enrollment.status == EnrollmentStatus.enrolled
+        )
+
+        mapped_items.append(
+            SessionRead(
+                id=session.id,
+                teacher_id=session.teacher_id,
+                teacher_name=(
+                    session.teacher.profile.full_name
+                    if session.teacher and session.teacher.profile and session.teacher.profile.full_name
+                    else session.teacher_id
+                ),
+                student_id=session.student_id,
+                subject_master_id=session.subject_master_id,
+                subject_name=(
+                    session.subject_master.subject.name
+                    if session.subject_master and session.subject_master.subject
+                    else None
+                ),
+                topic_description=session.topic_description,
+                slot_id=session.slot_id,
+                slot_start_time=slot.start_time if slot else None,
+                slot_end_time=slot.end_time if slot else None,
+                session_date=session.session_date,
+                status=session.status,
+                session_type=session.session_type,
+                max_students=session.max_students,
+                enrolled_count=enrolled_count,
+                seats_left=seats_left,
+                is_enrolled=is_enrolled,
+                group_per_student_charges=(
+                    session.teacher.teacher_profile.group_per_student_charges
+                    if session.teacher and session.teacher.teacher_profile
+                    else None
+                ),
+                meeting_link=session.meeting_link,
+                created_at=session.created_at,
+                updated_at=session.updated_at,
+            )
+        )
+
     return Page(
-        items=[SessionRead.model_validate(s) for s in items],
+        items=mapped_items,
         total=total,
         skip=skip,
         limit=limit,

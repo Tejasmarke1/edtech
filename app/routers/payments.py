@@ -12,9 +12,13 @@ from app.schemas.wallet import (
     PaymentTransactionRead,
     PaymentWebhookAck,
     ProcessWithdrawalRequest,
+    PaymentVerificationAck,
+    VerifyPaymentRequest,
+    WithdrawalReconcileResult,
     WithdrawalProcessResult,
 )
 from app.services import payment_service
+from app.utils.pagination import Page, PaginationParams
 
 router = APIRouter()
 
@@ -36,6 +40,17 @@ def get_payment_transaction(
     user: User = Depends(get_current_user),
 ):
     return payment_service.get_payment_transaction(db, user, transaction_id)
+
+
+@router.get("/transactions", response_model=Page[PaymentTransactionRead])
+def list_payment_transactions(
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return payment_service.list_payment_transactions(
+        db, user, skip=pagination.skip, limit=pagination.limit
+    )
 
 
 @router.post("/webhook/{provider}", response_model=PaymentWebhookAck)
@@ -63,6 +78,21 @@ async def payment_webhook(
     )
 
 
+@router.post("/verify/{provider}", response_model=PaymentVerificationAck)
+def verify_payment_checkout(
+    provider: str,
+    payload: VerifyPaymentRequest,
+    db: Session = Depends(get_db),
+):
+    return payment_service.verify_checkout_payment(
+        db,
+        provider=provider,
+        gateway_order_id=payload.gateway_order_id,
+        gateway_payment_id=payload.gateway_payment_id,
+        signature=payload.signature,
+    )
+
+
 @router.get("/earnings/monthly", response_model=MonthlyEarningsRead)
 def get_monthly_earnings(
     year: int = Query(..., ge=2020, le=2100),
@@ -83,4 +113,21 @@ def process_withdrawal(
     """Admin/mock — mark a withdrawal as success or failed."""
     return payment_service.process_withdrawal_status(
         db, payload.withdrawal_id, payload.success
+    )
+
+
+@router.post("/withdrawals/reconcile", response_model=WithdrawalReconcileResult)
+def reconcile_withdrawals(
+    older_than_minutes: int = Query(15, ge=1, le=1440),
+    retry_requested_limit: int = Query(20, ge=1, le=200),
+    processing_limit: int = Query(50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Admin/ops endpoint to reconcile pending withdrawal payouts."""
+    return payment_service.reconcile_withdrawals(
+        db,
+        older_than_minutes=older_than_minutes,
+        retry_requested_limit=retry_requested_limit,
+        processing_limit=processing_limit,
     )

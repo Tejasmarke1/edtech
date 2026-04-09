@@ -1,9 +1,10 @@
 """Wallet repository — DB queries for teacher_wallet & withdrawal."""
 
+import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import extract, func
+from sqlalchemy import extract, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.enrollment import EnrollmentStatus, SessionEnrollment
@@ -39,16 +40,71 @@ def get_or_create_wallet(
 
 
 def create_withdrawal(db: Session, teacher_id: str, amount: int) -> Withdrawal:
+    idempotency_key = hashlib.sha256(
+        f"withdrawal:{teacher_id}:{amount}:{datetime.now(timezone.utc).isoformat()}".encode("utf-8")
+    ).hexdigest()
     withdrawal = Withdrawal(
         id=str(uuid.uuid4()),
         teacher_id=teacher_id,
         amount=amount,
         status=WithdrawalStatus.requested,
         request_at=datetime.now(timezone.utc),
+        idempotency_key=idempotency_key,
     )
     db.add(withdrawal)
     db.flush()
     return withdrawal
+
+
+def get_withdrawal_by_id(db: Session, withdrawal_id: str) -> Withdrawal | None:
+    return db.query(Withdrawal).filter(Withdrawal.id == withdrawal_id).first()
+
+
+def get_withdrawal_by_idempotency_key(db: Session, idempotency_key: str) -> Withdrawal | None:
+    return db.query(Withdrawal).filter(Withdrawal.idempotency_key == idempotency_key).first()
+
+
+def get_withdrawal_by_gateway_payout_id(db: Session, gateway_payout_id: str) -> Withdrawal | None:
+    return (
+        db.query(Withdrawal)
+        .filter(Withdrawal.gateway_payout_id == gateway_payout_id)
+        .first()
+    )
+
+
+def get_latest_gateway_accounts(db: Session, teacher_id: str) -> tuple[str | None, str | None]:
+    latest = (
+        db.query(Withdrawal)
+        .filter(
+            Withdrawal.teacher_id == teacher_id,
+            or_(
+                Withdrawal.gateway_contact_id.isnot(None),
+                Withdrawal.gateway_fund_account_id.isnot(None),
+            ),
+        )
+        .order_by(Withdrawal.updated_at.desc())
+        .first()
+    )
+    if not latest:
+        return None, None
+    return latest.gateway_contact_id, latest.gateway_fund_account_id
+
+
+def get_active_withdrawal_for_amount(
+    db: Session,
+    teacher_id: str,
+    amount: int,
+) -> Withdrawal | None:
+    return (
+        db.query(Withdrawal)
+        .filter(
+            Withdrawal.teacher_id == teacher_id,
+            Withdrawal.amount == amount,
+            Withdrawal.status.in_([WithdrawalStatus.requested, WithdrawalStatus.processing]),
+        )
+        .order_by(Withdrawal.request_at.desc())
+        .first()
+    )
 
 
 def get_withdrawals(
@@ -126,12 +182,132 @@ def process_withdrawal(db: Session, withdrawal_id: str, success: bool) -> Withdr
         return None
     if success:
         withdrawal.status = WithdrawalStatus.success
+        withdrawal.last_error = None
     else:
         withdrawal.status = WithdrawalStatus.failed
         # Refund balance (locked to prevent races)
         wallet = get_or_create_wallet(db, withdrawal.teacher_id, lock=True)
         wallet.current_balance += withdrawal.amount
         wallet.total_withdraw -= withdrawal.amount
+        withdrawal.last_error = "Marked failed by manual process"
     withdrawal.processed_at = datetime.now(timezone.utc)
     db.flush()
     return withdrawal
+
+
+def mark_withdrawal_processing(
+    db: Session,
+    withdrawal: Withdrawal,
+    *,
+    gateway: str,
+    gateway_contact_id: str | None,
+    gateway_fund_account_id: str | None,
+    gateway_payout_id: str,
+    gateway_metadata: dict | None,
+) -> Withdrawal:
+    withdrawal.status = WithdrawalStatus.processing
+    withdrawal.gateway = gateway
+    withdrawal.gateway_contact_id = gateway_contact_id
+    withdrawal.gateway_fund_account_id = gateway_fund_account_id
+    withdrawal.gateway_payout_id = gateway_payout_id
+    withdrawal.gateway_metadata = gateway_metadata
+    withdrawal.last_error = None
+    db.flush()
+    return withdrawal
+
+
+def mark_withdrawal_requested_error(
+    db: Session,
+    withdrawal: Withdrawal,
+    *,
+    gateway: str,
+    gateway_contact_id: str | None,
+    gateway_fund_account_id: str | None,
+    last_error: str,
+) -> Withdrawal:
+    withdrawal.status = WithdrawalStatus.requested
+    withdrawal.gateway = gateway
+    withdrawal.gateway_contact_id = gateway_contact_id
+    withdrawal.gateway_fund_account_id = gateway_fund_account_id
+    withdrawal.last_error = last_error
+    db.flush()
+    return withdrawal
+
+
+def finalize_withdrawal_success(
+    db: Session,
+    withdrawal: Withdrawal,
+    *,
+    gateway_metadata: dict | None = None,
+) -> Withdrawal:
+    # Idempotent success transition.
+    if withdrawal.status == WithdrawalStatus.success:
+        return withdrawal
+
+    if withdrawal.status == WithdrawalStatus.failed:
+        wallet = get_or_create_wallet(db, withdrawal.teacher_id, lock=True)
+        wallet.current_balance -= withdrawal.amount
+        wallet.total_withdraw += withdrawal.amount
+
+    withdrawal.status = WithdrawalStatus.success
+    withdrawal.processed_at = datetime.now(timezone.utc)
+    withdrawal.last_error = None
+    if gateway_metadata is not None:
+        withdrawal.gateway_metadata = gateway_metadata
+    db.flush()
+    return withdrawal
+
+
+def finalize_withdrawal_failed(
+    db: Session,
+    withdrawal: Withdrawal,
+    *,
+    reason: str,
+    gateway_metadata: dict | None = None,
+) -> Withdrawal:
+    # Idempotent failure transition with single refund.
+    if withdrawal.status == WithdrawalStatus.failed:
+        return withdrawal
+
+    if withdrawal.status in (WithdrawalStatus.requested, WithdrawalStatus.processing):
+        wallet = get_or_create_wallet(db, withdrawal.teacher_id, lock=True)
+        wallet.current_balance += withdrawal.amount
+        wallet.total_withdraw -= withdrawal.amount
+
+    withdrawal.status = WithdrawalStatus.failed
+    withdrawal.processed_at = datetime.now(timezone.utc)
+    withdrawal.last_error = reason
+    if gateway_metadata is not None:
+        withdrawal.gateway_metadata = gateway_metadata
+    db.flush()
+    return withdrawal
+
+
+def list_requested_withdrawals(db: Session, *, limit: int = 20) -> list[Withdrawal]:
+    return (
+        db.query(Withdrawal)
+        .filter(Withdrawal.status == WithdrawalStatus.requested)
+        .order_by(Withdrawal.request_at.asc())
+        .limit(limit)
+        .all()
+    )
+
+
+def list_stuck_processing_withdrawals(
+    db: Session,
+    *,
+    older_than_minutes: int,
+    limit: int = 50,
+) -> list[Withdrawal]:
+    threshold = datetime.now(timezone.utc) - timedelta(minutes=max(older_than_minutes, 1))
+    return (
+        db.query(Withdrawal)
+        .filter(
+            Withdrawal.status == WithdrawalStatus.processing,
+            Withdrawal.updated_at <= threshold,
+            Withdrawal.gateway_payout_id.isnot(None),
+        )
+        .order_by(Withdrawal.updated_at.asc())
+        .limit(limit)
+        .all()
+    )

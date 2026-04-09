@@ -23,11 +23,12 @@ services:
       - XMPP_AUTH_DOMAIN=auth.meet.jitsi
       - XMPP_MUC_DOMAIN=muc.meet.jitsi
       - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
-      - PUBLIC_URL=https://127.0.0.1:8443
+      - PUBLIC_URL=127.0.0.1:8080
+      - BOSH_RELATIVE=true
       - TZ=Asia/Kolkata
-      - ENABLE_XMPP_WEBSOCKET=1
+      - ENABLE_XMPP_WEBSOCKET=0
       - ENABLE_COLIBRI_WEBSOCKET=1
-      - JVB_COLIBRI_WS_URL=ws://jitsi-jvb:9090
+      - JVB_COLIBRI_WS_URL=ws://127.0.0.1:8080/colibri-ws/jvb
     volumes:
       - jitsi-web-config:/config
       - jitsi-web-crontabs:/var/spool/cron/crontabs
@@ -120,7 +121,7 @@ services:
       - JVB_STUN_SERVERS=
       - COLIBRI_WEBSOCKET_ENABLED=true
       - ENABLE_COLIBRI_WEBSOCKET=1
-      - JVB_WS_DOMAIN=127.0.0.1:8443
+      - JVB_WS_DOMAIN=127.0.0.1:8080
       - JVB_WS_SERVER_ID=jvb
       - TZ=Asia/Kolkata
     volumes:

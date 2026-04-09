@@ -1,6 +1,6 @@
 """Rating schemas."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -28,5 +28,21 @@ class PendingRatingRead(BaseModel):
     session_id: str
     teacher_id: str
     student_id: str
-    session_date: datetime
+    session_date: date
     topic_description: str | None = None
+
+
+class RatingHistoryItem(BaseModel):
+    session_id: str
+    counterpart_user_name: str | None = None
+    stars: int
+    review_text: str | None = None
+    session_date: date
+    topic_description: str | None = None
+    created_at: datetime
+    direction: str
+
+
+class RatingHistoryRead(BaseModel):
+    given: list[RatingHistoryItem]
+    received: list[RatingHistoryItem]

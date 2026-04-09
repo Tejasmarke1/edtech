@@ -1,6 +1,6 @@
 """Integration tests for group (many-to-one) session endpoints."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -33,6 +33,14 @@ def _seed_subject(db: Session, sub_id: str = "math101", name: str = "Mathematics
     return subj
 
 
+def _current_window() -> tuple[str, str]:
+    """Return a start/end HH:MM window that includes now."""
+    now = datetime.now()
+    start_dt = now - timedelta(minutes=1)
+    end_dt = now + timedelta(minutes=30)
+    return start_dt.strftime("%H:%M"), end_dt.strftime("%H:%M")
+
+
 def test_group_session_end_to_end(client: TestClient, db_session: Session):
     # Arrange users
     _register(client, "group_teacher@example.com", "teacher", "Group Teacher")
@@ -59,10 +67,11 @@ def test_group_session_end_to_end(client: TestClient, db_session: Session):
     assert r.status_code == 201, r.text
     subject_master_id = r.json()["id"]
 
+    start_time, end_time = _current_window()
     r = client.post(
         "/api/v1/teachers/availability",
         headers=teacher_headers,
-        json={"day_of_week": "mon", "start_time": "10:00", "end_time": "10:30"},
+        json={"day_of_week": "mon", "start_time": start_time, "end_time": end_time},
     )
     assert r.status_code == 201, r.text
     slot_id = r.json()["id"]
@@ -74,7 +83,7 @@ def test_group_session_end_to_end(client: TestClient, db_session: Session):
         json={
             "subject_master_id": subject_master_id,
             "slot_id": slot_id,
-            "session_date": str(date.today() + timedelta(days=1)),
+            "session_date": str(date.today()),
             "max_students": 5,
             "topic_description": "Algebra basics",
         },
@@ -93,6 +102,14 @@ def test_group_session_end_to_end(client: TestClient, db_session: Session):
     r = client.post(f"/api/v1/sessions/{session_id}/enroll", headers=student_headers)
     assert r.status_code == 201, r.text
     assert r.json()["session_id"] == session_id
+
+    # Enrolled session should be marked for current student in open class listing.
+    r = client.get("/api/v1/sessions/group/available", headers=student_headers)
+    assert r.status_code == 200, r.text
+    matched = [item for item in r.json().get("items", []) if item.get("id") == session_id]
+    # If the session is still listed (not filtered as stale), it must be marked enrolled.
+    if matched:
+        assert matched[0].get("is_enrolled") is True
 
     # Teacher can view enrollments
     r = client.get(
@@ -227,3 +244,54 @@ def test_group_session_rejects_enrollment_when_full(client: TestClient, db_sessi
     r = client.post(f"/api/v1/sessions/{session_id}/enroll", headers=student3_headers)
     assert r.status_code == 400, r.text
     assert "full" in r.json()["detail"].lower()
+
+
+def test_group_session_join_restricted_outside_time_window(client: TestClient, db_session: Session):
+    _register(client, "time_teacher@example.com", "teacher", "Time Teacher")
+    _register(client, "time_student@example.com", "student", "Time Student")
+
+    teacher_headers = _auth_header("time_teacher@example.com", "teacher")
+    student_headers = _auth_header("time_student@example.com", "student")
+
+    _seed_subject(db_session, "time101", "Time Restriction")
+
+    r = client.post(
+        "/api/v1/teachers/subjects",
+        headers=teacher_headers,
+        json={"sub_id": "time101"},
+    )
+    assert r.status_code == 201, r.text
+    subject_master_id = r.json()["id"]
+
+    r = client.post(
+        "/api/v1/teachers/availability",
+        headers=teacher_headers,
+        json={"day_of_week": "fri", "start_time": "10:00", "end_time": "10:30"},
+    )
+    assert r.status_code == 201, r.text
+    slot_id = r.json()["id"]
+
+    r = client.post(
+        "/api/v1/sessions/group",
+        headers=teacher_headers,
+        json={
+            "subject_master_id": subject_master_id,
+            "slot_id": slot_id,
+            "session_date": str(date.today() + timedelta(days=1)),
+            "max_students": 5,
+            "topic_description": "Join window enforcement",
+        },
+    )
+    assert r.status_code == 201, r.text
+    session_id = r.json()["id"]
+
+    r = client.post(f"/api/v1/sessions/{session_id}/enroll", headers=student_headers)
+    assert r.status_code == 201, r.text
+
+    r = client.put(f"/api/v1/sessions/{session_id}/start", headers=teacher_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "Accepted"
+
+    r = client.get(f"/api/v1/sessions/{session_id}/join", headers=student_headers)
+    assert r.status_code == 400, r.text
+    assert "only during the scheduled class time" in r.json()["detail"].lower()

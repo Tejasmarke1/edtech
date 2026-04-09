@@ -63,6 +63,12 @@ def _webhook_signature(raw_body: bytes) -> str:
     return hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
 
 
+def _checkout_signature(order_id: str, payment_id: str) -> str:
+    secret = settings.PAYMENT_GATEWAY_KEY_SECRET or settings.PAYMENT_WEBHOOK_SECRET or settings.SECRET_KEY
+    payload = f"{order_id}|{payment_id}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+
+
 def _raw_json(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -1016,21 +1022,21 @@ class TestRatings:
         r = client.get("/api/v1/ratings/pending", headers=self.s_headers)
         assert len(r.json()) == 0
 
-    def test_both_parties_can_rate(self, client: TestClient):
-        # Student rates
+    def test_only_student_can_rate(self, client: TestClient):
+        # Student can rate
         r = client.post(
             "/api/v1/ratings",
             headers=self.s_headers,
             json={"session_id": self.session_id, "stars": 5},
         )
         assert r.status_code == 201
-        # Teacher rates
+        # Teacher cannot rate student
         r = client.post(
             "/api/v1/ratings",
             headers=self.t_headers,
             json={"session_id": self.session_id, "stars": 4},
         )
-        assert r.status_code == 201
+        assert r.status_code == 400
 
     def test_cannot_rate_non_completed(self, client: TestClient, db_session: Session):
         # Create a new session that's just requested (not completed)
@@ -1088,6 +1094,27 @@ class TestRatings:
             json={"session_id": self.session_id, "stars": 6},
         )
         assert r.status_code == 422
+
+    def test_rating_history(self, client: TestClient):
+        client.post(
+            "/api/v1/ratings",
+            headers=self.s_headers,
+            json={"session_id": self.session_id, "stars": 5, "review_text": "Nice"},
+        )
+
+        r = client.get("/api/v1/ratings/history", headers=self.s_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["given"]) == 1
+        assert len(body["received"]) == 0
+        assert body["given"][0]["stars"] == 5
+
+        r = client.get("/api/v1/ratings/history", headers=self.t_headers)
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["given"]) == 0
+        assert len(body["received"]) == 1
+        assert body["received"][0]["stars"] == 5
 
 
 # ===================================================================
@@ -1217,6 +1244,19 @@ class TestPayments:
         assert body["payee_id"] == "pay_t@example.com"
         assert body["payer_id"] == "pay_s@example.com"
 
+    def test_create_payment_order_rejected_after_capture(self, client: TestClient):
+        session_id = self._create_completed_session(client)
+        order = self._create_order(client, session_id)
+        self._capture_order(client, order)
+
+        second_try = client.post(
+            "/api/v1/payments/orders",
+            headers=self.s_headers,
+            json={"session_id": session_id},
+        )
+        assert second_try.status_code == 400
+        assert "already captured" in second_try.text
+
     def test_create_payment_order_not_accepted_or_completed(self, client: TestClient):
         """Cannot create order for a requested session."""
         r = client.post(
@@ -1263,6 +1303,50 @@ class TestPayments:
         assert wallet.status_code == 200
         assert wallet.json()["current_balance"] == 270
 
+    def test_list_payment_transactions_for_student_and_teacher(self, client: TestClient):
+        session_id = self._create_completed_session(client)
+        order = self._create_order(client, session_id)
+        self._capture_order(client, order)
+
+        student_list = client.get(
+            "/api/v1/payments/transactions", headers=self.s_headers
+        )
+        assert student_list.status_code == 200
+        s_body = student_list.json()
+        assert s_body["total"] >= 1
+        assert any(
+            item["transaction_id"] == order["transaction_id"]
+            for item in s_body["items"]
+        )
+
+        teacher_list = client.get(
+            "/api/v1/payments/transactions", headers=self.t_headers
+        )
+        assert teacher_list.status_code == 200
+        t_body = teacher_list.json()
+        assert t_body["total"] >= 1
+        assert any(
+            item["transaction_id"] == order["transaction_id"]
+            for item in t_body["items"]
+        )
+
+    def test_list_payment_transactions_pagination(self, client: TestClient):
+        for _ in range(2):
+            session_id = self._create_completed_session(client)
+            order = self._create_order(client, session_id)
+            self._capture_order(client, order)
+
+        page = client.get(
+            "/api/v1/payments/transactions",
+            headers=self.s_headers,
+            params={"skip": 0, "limit": 1},
+        )
+        assert page.status_code == 200
+        body = page.json()
+        assert body["limit"] == 1
+        assert body["total"] >= 2
+        assert len(body["items"]) == 1
+
     def test_webhook_replay_is_idempotent(self, client: TestClient):
         session_id = self._create_completed_session(client)
         order = self._create_order(client, session_id)
@@ -1302,6 +1386,195 @@ class TestPayments:
             content=_raw_json(payload),
         )
         assert r.status_code == 400
+
+    def test_razorpay_webhook_amount_mismatch_is_rejected(self, client: TestClient):
+        session_id = self._create_completed_session(client)
+
+        class _FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {
+                    "id": "order_rzp_mismatch",
+                    "amount": 32000,
+                    "currency": "INR",
+                }
+
+        with patch("app.services.payment_gateway_service.httpx.post", return_value=_FakeResponse()):
+            with patch.object(settings, "PAYMENT_GATEWAY", "razorpay"):
+                with patch.object(settings, "PAYMENT_GATEWAY_KEY_ID", "rzp_test_key"):
+                    with patch.object(settings, "PAYMENT_GATEWAY_KEY_SECRET", "rzp_test_secret"):
+                        order_resp = client.post(
+                            "/api/v1/payments/orders",
+                            headers=self.s_headers,
+                            json={"session_id": session_id},
+                        )
+        assert order_resp.status_code == 200
+        order = order_resp.json()
+
+        razorpay_payload = {
+            "event": "payment.captured",
+            "payload": {
+                "payment": {
+                    "entity": {
+                        "id": f"pay_{order['transaction_id']}",
+                        "order_id": order["gateway_order_id"],
+                        "status": "captured",
+                        "amount": 31000,
+                        "currency": "INR",
+                    }
+                }
+            },
+        }
+        raw = _raw_json(razorpay_payload)
+        bad_webhook = client.post(
+            "/api/v1/payments/webhook/razorpay",
+            headers={
+                "X-Razorpay-Signature": _webhook_signature(raw),
+                "Content-Type": "application/json",
+            },
+            content=raw,
+        )
+        assert bad_webhook.status_code == 400
+        assert "amount does not match" in bad_webhook.text
+
+    def test_checkout_verification_captures_transaction(self, client: TestClient):
+        session_id = self._create_completed_session(client)
+
+        class _FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {
+                    "id": "order_checkout_123",
+                    "amount": 32000,
+                    "currency": "INR",
+                }
+
+        with patch("app.services.payment_gateway_service.httpx.post", return_value=_FakeResponse()):
+            with patch.object(settings, "PAYMENT_GATEWAY", "razorpay"):
+                with patch.object(settings, "PAYMENT_GATEWAY_KEY_ID", "rzp_test_key"):
+                    with patch.object(settings, "PAYMENT_GATEWAY_KEY_SECRET", "rzp_test_secret"):
+                        order_resp = client.post(
+                            "/api/v1/payments/orders",
+                            headers=self.s_headers,
+                            json={"session_id": session_id},
+                        )
+        assert order_resp.status_code == 200, order_resp.text
+        order = order_resp.json()
+        payment_id = "pay_checkout_123"
+
+        verify_resp = client.post(
+            "/api/v1/payments/verify/razorpay",
+            json={
+                "gateway_order_id": order["gateway_order_id"],
+                "gateway_payment_id": payment_id,
+                "signature": _checkout_signature(order["gateway_order_id"], payment_id),
+            },
+        )
+        assert verify_resp.status_code == 200, verify_resp.text
+        body = verify_resp.json()
+        assert body["verification_status"] == "verified"
+        assert body["transaction_status"] == "captured"
+        assert body["gateway_payment_id"] == payment_id
+
+        tx = client.get(
+            f"/api/v1/payments/transactions/{order['transaction_id']}",
+            headers=self.s_headers,
+        )
+        assert tx.status_code == 200
+        assert tx.json()["status"] == "captured"
+
+        wallet = client.get("/api/v1/teachers/earnings", headers=self.t_headers)
+        assert wallet.status_code == 200
+        assert wallet.json()["current_balance"] == 270
+
+    def test_checkout_verification_is_idempotent(self, client: TestClient):
+        session_id = self._create_completed_session(client)
+
+        class _FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {
+                    "id": "order_checkout_repeat",
+                    "amount": 32000,
+                    "currency": "INR",
+                }
+
+        with patch("app.services.payment_gateway_service.httpx.post", return_value=_FakeResponse()):
+            with patch.object(settings, "PAYMENT_GATEWAY", "razorpay"):
+                with patch.object(settings, "PAYMENT_GATEWAY_KEY_ID", "rzp_test_key"):
+                    with patch.object(settings, "PAYMENT_GATEWAY_KEY_SECRET", "rzp_test_secret"):
+                        order_resp = client.post(
+                            "/api/v1/payments/orders",
+                            headers=self.s_headers,
+                            json={"session_id": session_id},
+                        )
+        order = order_resp.json()
+        payment_id = "pay_checkout_repeat"
+        signature = _checkout_signature(order["gateway_order_id"], payment_id)
+
+        first = client.post(
+            "/api/v1/payments/verify/razorpay",
+            json={
+                "gateway_order_id": order["gateway_order_id"],
+                "gateway_payment_id": payment_id,
+                "signature": signature,
+            },
+        )
+        assert first.status_code == 200
+        assert first.json()["verification_status"] == "verified"
+
+        second = client.post(
+            "/api/v1/payments/verify/razorpay",
+            json={
+                "gateway_order_id": order["gateway_order_id"],
+                "gateway_payment_id": payment_id,
+                "signature": signature,
+            },
+        )
+        assert second.status_code == 200
+        assert second.json()["verification_status"] == "already_verified"
+
+    def test_checkout_verification_invalid_signature(self, client: TestClient):
+        session_id = self._create_completed_session(client)
+
+        class _FakeResponse:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {
+                    "id": "order_checkout_invalid",
+                    "amount": 32000,
+                    "currency": "INR",
+                }
+
+        with patch("app.services.payment_gateway_service.httpx.post", return_value=_FakeResponse()):
+            with patch.object(settings, "PAYMENT_GATEWAY", "razorpay"):
+                with patch.object(settings, "PAYMENT_GATEWAY_KEY_ID", "rzp_test_key"):
+                    with patch.object(settings, "PAYMENT_GATEWAY_KEY_SECRET", "rzp_test_secret"):
+                        order_resp = client.post(
+                            "/api/v1/payments/orders",
+                            headers=self.s_headers,
+                            json={"session_id": session_id},
+                        )
+        order = order_resp.json()
+
+        bad = client.post(
+            "/api/v1/payments/verify/razorpay",
+            json={
+                "gateway_order_id": order["gateway_order_id"],
+                "gateway_payment_id": "pay_invalid_sig",
+                "signature": "bad-signature",
+            },
+        )
+        assert bad.status_code == 400
+        assert "Invalid checkout signature" in bad.text
 
     # ---- Monthly earnings ----
     def test_monthly_earnings_with_sessions(self, client: TestClient):

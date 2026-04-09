@@ -1,0 +1,70 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>EdTech - Student: Priya Sharma</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #fff; }
+        .header { background: #16213e; padding: 12px 24px; display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #0f3460; }
+        .badge { background: #e94560; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .role { color: #fff; background: #533483; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: bold; }
+        h1 { font-size: 18px; flex-grow: 1; }
+        #jitsi-container { width: 100%; height: calc(100vh - 52px); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <span class="badge">LIVE</span>
+        <h1 id="session-title">Newton's Laws of Motion</h1>
+        <span class="role">STUDENT</span>
+        <span id="participant-name">Priya Sharma</span>
+    </div>
+    <div id="jitsi-container"></div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const jitsiBaseUrl = params.get("jitsiBaseUrl") || "https://127.0.0.1:8443";
+        const domain = params.get("domain") || new URL(jitsiBaseUrl).host;
+        const roomName = params.get("room");
+        const jwt = params.get("jwt");
+        const subject = params.get("subject") || "Live session";
+        const displayName = params.get("name") || "Student";
+        const email = params.get("email") || "student@example.com";
+        const container = document.getElementById("jitsi-container");
+
+        document.getElementById("session-title").textContent = subject;
+        document.getElementById("participant-name").textContent = displayName;
+
+        if (!roomName || !jwt) {
+            container.innerHTML = '<div style="padding:24px;"><h2>Missing session parameters</h2><p style="margin-top:8px;">Open this page with <code>room</code> and <code>jwt</code> query parameters from the backend join response.</p></div>';
+        } else {
+            const script = document.createElement("script");
+            script.src = `${jitsiBaseUrl}/external_api.js`;
+            script.onload = function () {
+                new JitsiMeetExternalAPI(domain, {
+                    roomName: roomName,
+                    jwt: jwt,
+                    parentNode: container,
+                    userInfo: { displayName: displayName, email: email },
+                    configOverwrite: {
+                        prejoinPageEnabled: false,
+                        startWithAudioMuted: true,
+                        startWithVideoMuted: false,
+                        subject: subject,
+                    },
+                    interfaceConfigOverwrite: {
+                        SHOW_JITSI_WATERMARK: false,
+                        SHOW_BRAND_WATERMARK: false,
+                        DEFAULT_BACKGROUND: '#1a1a2e',
+                        TOOLBAR_BUTTONS: ['microphone','camera','chat','desktop','fullscreen','hangup','participants-pane','tileview','toggle-camera'],
+                    },
+                });
+            };
+            script.onerror = function () {
+                container.innerHTML = `<div style="padding:24px;"><h2>Could not load Jitsi API</h2><p style="margin-top:8px;">Failed to load external_api.js from <strong>${jitsiBaseUrl}</strong>.<br><br>If using HTTPS with a self-signed certificate, first <a href="${jitsiBaseUrl}" target="_blank" style="color:#4fc3f7;">open ${jitsiBaseUrl}</a> and accept the certificate, then reload this page.</p></div>`;
+            };
+            document.head.appendChild(script);
+        }
+    </script>
+</body>
+</html>

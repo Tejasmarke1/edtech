@@ -1,0 +1,320 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 0.1.2 Typography System - Base Layer */
+@layer base {
+  html {
+    @apply scroll-smooth;
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+    font-size: clamp(14px, 2.5vw, 16px);
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  /* Typography Hierarchy */
+  h1 {
+    @apply text-h1 font-heading font-semibold leading-tight tracking-normal;
+  }
+
+  h2 {
+    @apply text-h2 font-heading font-semibold leading-tight tracking-normal;
+  }
+
+  h3 {
+    @apply text-h3 font-heading font-semibold leading-tight tracking-normal;
+  }
+
+  h4, h5, h6 {
+    @apply text-lg font-heading font-semibold leading-tight tracking-normal;
+  }
+
+  p {
+    @apply text-body leading-relaxed;
+  }
+
+  /* Links */
+  a {
+    @apply text-primary-600 hover:text-primary-700 underline transition-colors duration-standard;
+  }
+
+  a:focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 rounded;
+  }
+
+  /* Form Elements */
+  input, textarea, select {
+    @apply font-sans;
+  }
+
+  input:disabled, textarea:disabled, select:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  /* Remove default search button in inputs */
+  input[type="search"]::-webkit-search-decoration {
+    @apply hidden;
+  }
+
+  /* Focus visible styles for keyboard navigation */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 rounded;
+  }
+
+  /* Selection color */
+  ::selection {
+    @apply bg-primary-200 text-primary-900;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-100;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-400 rounded hover:bg-slate-500;
+  }
+
+  /* Smooth transitions */
+  * {
+    @apply transition-colors duration-standard;
+  }
+
+  button, a, input, select, textarea {
+    @apply transition-all duration-standard;
+  }
+
+}
+
+/* 0.4.2 Transitions and Animations */
+@layer utilities {
+  /* Animation utilities */
+  @keyframes shimmer {
+    0% {
+      background-position: -1000px 0;
+    }
+    100% {
+      background-position: 1000px 0;
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideInRight {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideOutRight {
+    from {
+      transform: translateX(0);
+      opacity: 1;
+    }
+    to {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+  }
+
+  @keyframes scaleUp {
+    from {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .animate-shimmer {
+    @apply bg-gradient-to-r from-slate-200 via-slate-50 to-slate-200 bg-[length:1000px_100%];
+    animation: shimmer 2s infinite;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 150ms ease-out;
+  }
+
+  .animate-slide-in-right {
+    animation: slideInRight 150ms ease-out;
+  }
+
+  .animate-slide-out-right {
+    animation: slideOutRight 100ms ease-in;
+  }
+
+  .animate-scale-up {
+    animation: scaleUp 150ms ease-out;
+  }
+
+  /* Will-change utilities */
+  .will-animate {
+    @apply will-change-transform;
+  }
+
+  /* Elevation utilities */
+  .elevation-none {
+    @apply shadow-none;
+  }
+
+  .elevation-sm {
+    @apply shadow-sm;
+  }
+
+  .elevation-md {
+    @apply shadow-md;
+  }
+
+  .elevation-lg {
+    @apply shadow-lg;
+  }
+
+  .elevation-xl {
+    @apply shadow-xl;
+  }
+
+  /* Hover elevation */
+  .hover-elevation {
+    @apply hover:shadow-md hover:translate-y-[-2px] transition-all duration-standard;
+  }
+
+  /* Accessibility utilities */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Text truncation */
+  .line-clamp-1 {
+    @apply overflow-hidden text-ellipsis whitespace-nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    @apply overflow-hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    @apply overflow-hidden;
+  }
+
+  /* Touch-friendly utilities */
+  .touch-target {
+    @apply min-h-11 min-w-11;
+  }
+
+  /* Aspect ratio utilities */
+  .aspect-video {
+    @apply relative;
+    aspect-ratio: 16 / 9;
+  }
+
+  .aspect-square {
+    @apply relative;
+    aspect-ratio: 1 / 1;
+  }
+}
+
+/* Component layer - basic element styles */
+@layer components {
+  /* Text variants for easy reuse */
+  .ds-text-display {
+    @apply text-display font-display font-semibold;
+  }
+
+  .ds-text-h1 {
+    @apply text-h1 font-heading font-semibold;
+  }
+
+  .ds-text-h2 {
+    @apply text-h2 font-heading font-semibold;
+  }
+
+  .ds-text-h3 {
+    @apply text-h3 font-heading font-semibold;
+  }
+
+  .ds-text-body-lg {
+    @apply text-body-lg;
+  }
+
+  .ds-text-body {
+    @apply text-body;
+  }
+
+  .ds-text-body-sm {
+    @apply text-body-sm;
+  }
+
+  /* Color utilities */
+  .ds-text-primary {
+    @apply text-text-primary dark:text-slate-50;
+  }
+
+  .ds-text-secondary {
+    @apply text-text-secondary dark:text-slate-400;
+  }
+
+  .ds-text-tertiary {
+    @apply text-text-tertiary dark:text-slate-500;
+  }
+
+  .ds-bg-surface {
+    @apply bg-bg-surface dark:bg-slate-900;
+  }
+
+  .ds-bg-surface-light {
+    @apply bg-bg-surface-light dark:bg-slate-800;
+  }
+
+  .ds-border-subtle {
+    @apply border-border-subtle dark:border-slate-700;
+  }
+}

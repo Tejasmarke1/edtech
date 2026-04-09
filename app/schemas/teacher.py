@@ -44,7 +44,7 @@ class TeacherSubjectRead(BaseModel):
 # ---------- Video Demo ----------
 class AddVideoRequest(BaseModel):
     video_url: str = Field(..., max_length=500)
-    duration_seconds: int = Field(..., gt=0, le=600, description="Max 600s (10 min)")
+    duration_seconds: int = Field(..., gt=0, description="Video duration in seconds")
 
 
 class TeacherVideoRead(BaseModel):
@@ -61,3 +61,30 @@ class TeacherVideoRead(BaseModel):
 class TeacherVideoAccessRead(BaseModel):
     id: str
     video_url: str
+
+
+class CreateVideoUploadRequest(BaseModel):
+    filename: str = Field(..., max_length=255)
+    content_type: str = Field(..., max_length=255)
+
+
+class CreateVideoUploadResponse(BaseModel):
+    upload_id: str
+    upload_url: str
+    file_url: str
+    storage_provider: str
+    expires_in_seconds: int
+
+
+class FinalizeVideoUploadRequest(BaseModel):
+    upload_id: str = Field(..., max_length=255)
+
+
+class FinalizeVideoUploadResponse(BaseModel):
+    upload_id: str
+    file_url: str
+
+
+class CompleteOnboardingResponse(BaseModel):
+    success: bool
+    message: str

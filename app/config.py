@@ -63,6 +63,21 @@ class Settings(BaseSettings):
     # ---------- CORS ----------
     CORS_ORIGINS: list[str] = Field(...)
 
+    # ---------- Media Uploads ----------
+    PUBLIC_BASE_URL: str = Field("http://localhost:8000")
+    UPLOAD_URL_EXPIRES_SECONDS: int = Field(900)
+    MAX_VIDEO_UPLOAD_SIZE_MB: int = Field(200)
+
+    # ---------- S3 Uploads ----------
+    S3_BUCKET_NAME: str = Field("")
+    S3_REGION: str = Field("us-east-1")
+    S3_ENDPOINT_URL: str | None = Field(None)
+    S3_PUBLIC_BASE_URL: str | None = Field(None)
+    S3_OBJECT_PUBLIC: bool = Field(True)
+    AWS_ACCESS_KEY_ID: str | None = Field(None)
+    AWS_SECRET_ACCESS_KEY: str | None = Field(None)
+    AWS_SESSION_TOKEN: str | None = Field(None)
+
 
 # Singleton — import this wherever settings are needed.
 settings = Settings()

@@ -4,9 +4,17 @@ from sqlalchemy.orm import Session
 
 from app.models.teacher import TeacherProfile, TeacherSubjectMasterList, TeacherVideoDemo
 from app.models.user import User
-from app.repositories import availability_repo, subject_repo, teacher_repo, wallet_repo
+from app.config import settings
+from app.repositories import (
+    availability_repo,
+    payment_repo,
+    subject_repo,
+    teacher_repo,
+    wallet_repo,
+)
 from app.schemas.availability import AvailabilitySlotCreate, AvailabilitySlotUpdate
 from app.schemas.teacher import AddSubjectRequest, AddVideoRequest, TeacherProfileUpdate, TeacherVideoAccessRead
+from app.services.video_upload_service import resolve_playback_url
 from app.schemas.wallet import WithdrawalRequest
 from app.utils.exceptions import BadRequestError, ForbiddenError, NotFoundError
 
@@ -14,6 +22,28 @@ MAX_ACTIVE_SUBJECTS = 5
 MAX_VIDEOS_PER_SUBJECT = 2
 MAX_VIDEO_DURATION = 600  # 10 minutes in seconds
 
+
+def _is_uploaded_media_url(video_url: str) -> bool:
+    url_lower = (video_url or "").lower()
+    if not url_lower:
+        return False
+
+    if settings.S3_PUBLIC_BASE_URL:
+        base = settings.S3_PUBLIC_BASE_URL.rstrip("/").lower()
+        if url_lower.startswith(f"{base}/"):
+            return True
+
+    if settings.S3_BUCKET_NAME and settings.S3_REGION:
+        regional_host = f"{settings.S3_BUCKET_NAME}.s3.{settings.S3_REGION}.amazonaws.com".lower()
+        if regional_host in url_lower and "/teacher-videos/" in url_lower:
+            return True
+
+    if settings.S3_BUCKET_NAME:
+        legacy_host = f"{settings.S3_BUCKET_NAME}.s3.amazonaws.com".lower()
+        if legacy_host in url_lower and "/teacher-videos/" in url_lower:
+            return True
+
+    return False
 
 # ---------- Profile ----------
 def get_profile(db: Session, user: User) -> TeacherProfile:
@@ -87,7 +117,7 @@ def add_video(db: Session, user: User, sub_id: str, payload: AddVideoRequest) ->
     if len(existing_videos) >= MAX_VIDEOS_PER_SUBJECT:
         raise BadRequestError(f"Maximum {MAX_VIDEOS_PER_SUBJECT} videos per subject")
 
-    if payload.duration_seconds > MAX_VIDEO_DURATION:
+    if _is_uploaded_media_url(payload.video_url) and payload.duration_seconds > MAX_VIDEO_DURATION:
         raise BadRequestError(f"Video cannot exceed {MAX_VIDEO_DURATION} seconds (10 min)")
 
     return teacher_repo.add_video_demo(
@@ -101,7 +131,8 @@ def get_video_access_url(db: Session, user: User, video_id: str) -> TeacherVideo
         raise NotFoundError("Video not found")
     if video.user_name != user.user_name:
         raise ForbiddenError("You cannot access this video")
-    return TeacherVideoAccessRead(id=video.id, video_url=video.video_url)
+    playback_url = resolve_playback_url(video.video_url)
+    return TeacherVideoAccessRead(id=video.id, video_url=playback_url)
 
 
 # ---------- Availability ----------
@@ -146,22 +177,17 @@ def get_earnings(db: Session, user: User):
 
 
 def get_monthly_earnings(db: Session, user: User, year: int, month: int) -> dict:
-    return wallet_repo.get_monthly_earnings(db, user.user_name, year, month)
+    return payment_repo.get_monthly_captured_earnings(db, user.user_name, year, month)
 
 
 def request_withdrawal(db: Session, user: User, payload: WithdrawalRequest):
-    # Lock wallet row to prevent concurrent overdraw
-    wallet = wallet_repo.get_or_create_wallet(db, user.user_name, lock=True)
-    if payload.amount > wallet.current_balance:
-        raise BadRequestError(
-            f"Insufficient balance. Available: {wallet.current_balance}"
-        )
-    # Deduct from wallet
-    wallet.current_balance -= payload.amount
-    wallet.total_withdraw += payload.amount
-    db.flush()
+    from app.services import payment_service
 
-    return wallet_repo.create_withdrawal(db, user.user_name, payload.amount)
+    return payment_service.request_withdrawal_payout(
+        db,
+        user,
+        amount=payload.amount,
+    )
 
 
 def get_withdrawal_history(db: Session, user: User, *, skip: int = 0, limit: int = 20):

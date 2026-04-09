@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
-from app.schemas.rating import PendingRatingRead, RatingCreate, RatingRead
+from app.schemas.rating import (
+    PendingRatingRead,
+    RatingCreate,
+    RatingHistoryRead,
+    RatingRead,
+)
 from app.services import rating_service
 
 router = APIRouter()
@@ -26,3 +31,11 @@ def get_pending_ratings(
     user: User = Depends(get_current_user),
 ):
     return rating_service.get_pending_ratings(db, user)
+
+
+@router.get("/history", response_model=RatingHistoryRead)
+def get_rating_history(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return rating_service.get_rating_history(db, user)

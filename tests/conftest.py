@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.dependencies import get_db
 from app.main import app
+from app.config import settings
 
 # ---------- SQLite in-memory engine ----------
 engine_test = create_engine(
@@ -48,6 +49,20 @@ def _mock_redis():
     mock.delete.side_effect = lambda k: store.pop(k, None)
     with patch("app.services.auth_service._redis", mock):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _stable_jitsi_settings():
+    """Use deterministic Jitsi settings for test assertions."""
+    original_url = settings.JITSI_URL
+    original_domain = settings.JITSI_DOMAIN
+    settings.JITSI_URL = "https://meet.jit.si"
+    settings.JITSI_DOMAIN = "meet.jit.si"
+    try:
+        yield
+    finally:
+        settings.JITSI_URL = original_url
+        settings.JITSI_DOMAIN = original_domain
 
 
 @pytest.fixture(autouse=True)
