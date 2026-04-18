@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     JITSI_APP_ID: str = Field(...)
     JITSI_SECRET: str = Field(...)
     JITSI_DOMAIN: str = Field(...)
+    JITSI_USE_JWT: bool = Field(True)
 
     # ---------- CORS ----------
     CORS_ORIGINS: list[str] = Field(...)

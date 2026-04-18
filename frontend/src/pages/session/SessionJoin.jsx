@@ -4,6 +4,61 @@ import { useAuthStore } from '../../stores/authStore';
 import apiClient from '../../api/client';
 import toast from 'react-hot-toast';
 
+const DEFAULT_JITSI_DOMAIN = 'meet.jit.si';
+const DEFAULT_EXTERNAL_API = 'https://meet.jit.si/external_api.js';
+
+function resolveJitsiRuntimeConfig(meetingLink) {
+  if (!meetingLink) {
+    return {
+      domain: DEFAULT_JITSI_DOMAIN,
+      externalApiUrl: DEFAULT_EXTERNAL_API,
+    };
+  }
+
+  try {
+    const url = new URL(meetingLink);
+    return {
+      domain: url.host,
+      externalApiUrl: `${url.origin}/external_api.js`,
+    };
+  } catch {
+    return {
+      domain: DEFAULT_JITSI_DOMAIN,
+      externalApiUrl: DEFAULT_EXTERNAL_API,
+    };
+  }
+}
+
+function loadJitsiExternalApi(scriptUrl) {
+  return new Promise((resolve, reject) => {
+    if (window.JitsiMeetExternalAPI) {
+      resolve();
+      return;
+    }
+
+    const normalizedScriptUrl = new URL(scriptUrl, window.location.href).href;
+    const existing = document.querySelector('script[data-jitsi-external-api="true"]');
+
+    if (existing) {
+      if (existing.src === normalizedScriptUrl) {
+        existing.addEventListener('load', () => resolve(), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Failed to load Jitsi API script.')), { once: true });
+        return;
+      }
+
+      existing.remove();
+    }
+
+    const script = document.createElement('script');
+    script.src = normalizedScriptUrl;
+    script.async = true;
+    script.dataset.jitsiExternalApi = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Jitsi API script.'));
+    document.body.appendChild(script);
+  });
+}
+
 /**
  * SessionJoin Component
  * Displays Jitsi Meet video conference interface for session participants
@@ -29,9 +84,10 @@ export default function SessionJoin() {
 
         // Extract room name from meeting link
         const roomName = data.room_name || data.meeting_link?.split('/').pop();
+        const jitsiConfig = resolveJitsiRuntimeConfig(data.meeting_link);
+        await loadJitsiExternalApi(jitsiConfig.externalApiUrl);
         
         if (jitsiContainerRef.current && window.JitsiMeetExternalAPI) {
-          const domain = 'localhost:8080';
           const options = {
             roomName: roomName,
             width: '100%',
@@ -41,12 +97,17 @@ export default function SessionJoin() {
               displayName: user?.name || user?.user_name || 'Student',
               email: user?.email,
             },
-            jwt: data.jwt_token,
+            ...(data.jwt_token ? { jwt: data.jwt_token } : {}),
             configOverwrite: {
               startWithAudioMuted: true,
               startWithVideoMuted: false,
               disableSimulcast: false,
+              prejoinPageEnabled: false,
+              prejoinConfig: {
+                enabled: false,
+              },
               enableWelcomePage: false,
+              disableThirdPartyRequests: true,
             },
             interfaceConfigOverwrite: {
               DEFAULT_REMOTE_DISPLAY_NAME: 'Guest',
@@ -55,7 +116,7 @@ export default function SessionJoin() {
             },
           };
 
-          jitsiApiRef.current = new window.JitsiMeetExternalAPI(domain, options);
+          jitsiApiRef.current = new window.JitsiMeetExternalAPI(jitsiConfig.domain, options);
 
           // Handle events
           jitsiApiRef.current.addEventListener('videoConferenceJoined', () => {

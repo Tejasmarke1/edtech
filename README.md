@@ -52,6 +52,7 @@ curl http://localhost:8000/health    # should return {"status":"ok"}
 | Redis | localhost:6379 |
 
 > **Note:** Jitsi uses a self-signed certificate. Accept the browser warning when first visiting https://localhost:8443.
+> If participants join from another device and see internet/disconnected warnings, set `JVB_ADVERTISE_IPS` in `.env` to your host machine IPv4 (not `127.0.0.1`), then run `docker compose up -d --build`.
 
 ## Local Development (without Docker for app)
 

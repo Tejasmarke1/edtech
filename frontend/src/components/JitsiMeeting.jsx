@@ -63,11 +63,12 @@ export default function JitsiMeeting({
       <div className="flex-1 relative bg-black min-h-0">
         <div ref={containerRef} className="h-full w-full" />
         {isConnecting && (
-          <div className="absolute inset-0 grid place-items-center bg-slate-950/85 backdrop-blur-[2px]">
+          <div className="absolute inset-0 grid place-items-center bg-slate-950/85 backdrop-blur-[2px] pointer-events-none">
             <div className="text-center text-white px-4">
               <div className="animate-spin rounded-full h-10 w-10 border-4 border-slate-300 border-t-blue-500 mx-auto mb-3" />
               <p className="font-medium">Connecting to meeting</p>
               <p className="text-sm text-slate-300 mt-1">Camera and microphone permissions may be requested.</p>
+              <p className="text-xs text-slate-400 mt-2">If a Join button appears behind this overlay, click it to enter.</p>
             </div>
           </div>
         )}

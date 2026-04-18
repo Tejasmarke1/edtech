@@ -53,7 +53,7 @@ export default function Payments() {
   const loadPayableSessions = async (txSource = transactions) => {
     setIsLoadingSessions(true);
     try {
-      const { data } = await apiClient.get('/sessions/my?skip=0&limit=200');
+      const { data } = await apiClient.get('/sessions/my?skip=0&limit=100');
       const items = data.items || (Array.isArray(data) ? data : []);
 
       const normalizedTx = txSource.map((tx) => ({

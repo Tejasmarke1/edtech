@@ -83,28 +83,55 @@ export default function MeetingPage() {
     setMeetingError('');
 
     try {
-      const fromState = location.state?.roomName && location.state?.jwtToken;
+      const fromState = Boolean(
+        location.state?.roomName
+        && (location.state?.meetingLink || location.state?.jwtToken)
+      );
 
       if (fromState) {
         setMeetingPayload({
           room_name: location.state.roomName,
-          jwt_token: location.state.jwtToken,
+          jwt_token: location.state.jwtToken || null,
           meeting_link: location.state.meetingLink,
         });
       } else {
         try {
-          await apiClient.post(`/sessions/${sessionId}/create-room`);
-        } catch {
-          // Room creation is optional for some backends; ignore and continue.
-        }
+          const { data } = await apiClient.get(`/sessions/${sessionId}/join`);
+          setMeetingPayload(data);
+        } catch (joinError) {
+          const detail = String(joinError?.response?.data?.detail || '');
+          const missingRoom = joinError?.response?.status === 400 && detail.toLowerCase().includes('no meeting room created');
+          const teacherNotStarted = joinError?.response?.status === 400 && detail.toLowerCase().includes('teacher has not started');
 
-        const { data } = await apiClient.get(`/sessions/${sessionId}/join`);
-        setMeetingPayload(data);
+          if (!(missingRoom || teacherNotStarted)) {
+            throw joinError;
+          }
+
+          // Fallback only for teacher to initialize legacy/no-room sessions.
+          if (userRole !== 'teacher') {
+            throw joinError;
+          }
+
+          await apiClient.post(`/sessions/${sessionId}/create-room`);
+          const { data } = await apiClient.get(`/sessions/${sessionId}/join`);
+          setMeetingPayload(data);
+        }
       }
 
       try {
-        const { data: sessionData } = await apiClient.get(`/sessions/${sessionId}`);
-        setSessionSummary(sessionData);
+        // Use "my sessions" first because group-session participants may not
+        // be authorized on the direct session detail endpoint.
+        const { data: mySessionsData } = await apiClient.get('/sessions/my?skip=0&limit=100');
+        const myItems = mySessionsData.items || (Array.isArray(mySessionsData) ? mySessionsData : []);
+        const current = myItems.find((item) => item.id === sessionId);
+
+        if (current) {
+          setSessionSummary(current);
+        } else {
+          // Fallback for direct-detail-compatible flows.
+          const { data: sessionData } = await apiClient.get(`/sessions/${sessionId}`);
+          setSessionSummary(sessionData);
+        }
       } catch {
         setSessionSummary(null);
       }
@@ -122,7 +149,7 @@ export default function MeetingPage() {
   }, [sessionId]);
 
   useEffect(() => {
-    if (!meetingPayload?.jwt_token || hasHandledRemoteEndRef.current) return undefined;
+    if (!(meetingPayload?.room_name || meetingPayload?.meeting_link) || hasHandledRemoteEndRef.current) return undefined;
 
     const intervalId = window.setInterval(async () => {
       try {
@@ -180,7 +207,7 @@ export default function MeetingPage() {
     );
   }
 
-  if (!meetingPayload?.jwt_token || !(meetingPayload?.room_name || meetingPayload?.meeting_link)) {
+  if (!(meetingPayload?.room_name || meetingPayload?.meeting_link)) {
     return (
       <Card className="max-w-3xl mx-auto text-center border border-slate-200 shadow-sm rounded-2xl">
         <h2 className="text-xl font-bold text-slate-900 mb-2">Meeting not available</h2>

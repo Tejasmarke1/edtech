@@ -18,6 +18,23 @@ def build_meeting_url(room_name: str) -> str:
     return f"{settings.JITSI_URL}/{room_name}"
 
 
+def should_issue_jitsi_jwt() -> bool:
+    """Return whether backend should attach JWT for meeting joins.
+
+    Public meet.jit.si does not accept custom app JWT secrets, so tokens
+    should be disabled there even if local config accidentally leaves JWT on.
+    """
+    if not settings.JITSI_USE_JWT:
+        return False
+
+    url = (settings.JITSI_URL or "").lower()
+    domain = (settings.JITSI_DOMAIN or "").lower()
+    if "meet.jit.si" in url or domain == "meet.jit.si":
+        return False
+
+    return True
+
+
 def create_jitsi_token(
     *,
     room_name: str,

@@ -7,17 +7,7 @@ docker exec edtech-jitsi-web nginx -s reload
 
 Write-Host "[2/3] Disabling AWS harvester in JVB..."
 docker exec edtech-jitsi-jvb sh -c @'
-cat > /config/custom-jvb.conf << CONF
-ice4j {
-    harvest {
-        mapping {
-            aws {
-                enabled = false
-            }
-        }
-    }
-}
-CONF
+printf 'ice4j {\n    harvest {\n        mapping {\n            aws {\n                enabled = false\n            }\n        }\n    }\n}\n' > /config/custom-jvb.conf
 '@
 docker restart edtech-jitsi-jvb
 
@@ -28,3 +18,4 @@ Write-Host "Done! Post-start configuration complete."
 Write-Host "   API:   http://localhost:8000/health"
 Write-Host "   Jitsi: https://localhost:8443"
 Write-Host "   Docs:  http://localhost:8000/docs"
+Write-Host "   Note:  For other devices on LAN, set JVB_ADVERTISE_IPS in .env to your PC IPv4 (not 127.0.0.1)."

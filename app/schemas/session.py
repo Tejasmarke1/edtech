@@ -122,5 +122,5 @@ class EnrollmentRead(BaseModel):
 class MeetingLinkRead(BaseModel):
     session_id: str
     meeting_link: str
-    jwt_token: str
+    jwt_token: str | None = None
     room_name: str

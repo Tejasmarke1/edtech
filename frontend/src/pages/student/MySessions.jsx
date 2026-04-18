@@ -21,9 +21,9 @@ function getStatusCategory(session) {
   const status = session?.status;
   if (status === 'Requested' || status === 'Rescheduled') return 'pending';
 
-  // Keep enrolled group classes (open or started) under Open Classes,
-  // not in generic Upcoming list.
-  if (session?.session_type === 'group' && (status === 'Open' || status === 'Accepted')) {
+  // Keep only open group classes under Open Classes.
+  // Accepted sessions should appear in Upcoming for all session types.
+  if (session?.session_type === 'group' && status === 'Open') {
     return 'open';
   }
 
@@ -333,9 +333,11 @@ export default function MySessions() {
       const tabStatus = getStatusCategory(session);
       const tabMatch = activeTab === 'all' || tabStatus === activeTab;
 
-      // Upcoming should contain only future sessions.
+      // Upcoming should include today's accepted sessions as well.
       const startAt = getSessionStartDateTime(session);
-      const upcomingTimeMatch = activeTab !== 'upcoming' || !startAt || startAt >= new Date();
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const upcomingTimeMatch = activeTab !== 'upcoming' || !startAt || startAt >= startOfToday;
 
       const statusMatch = statusFilter === 'all' || session.status === statusFilter;
       const subjectMatch = subjectFilter === 'all' || session.subject_master_id === subjectFilter;
@@ -375,6 +377,16 @@ export default function MySessions() {
     }
 
     if (session.status === 'Accepted') {
+      if (!session.meeting_link) {
+        actions.push({
+          label: 'Waiting for Teacher to Start',
+          action: 'join',
+          variant: 'blue',
+          disabled: true,
+        });
+        return actions;
+      }
+
       const joinAllowed = canJoinSession(session);
       actions.push({
         label: joinAllowed ? 'Join Meeting' : `Join At ${formatJoinOpenAt(session)}`,

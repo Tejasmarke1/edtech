@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { toast } from 'react-hot-toast';
+import { useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 import { usePendingRatings, useSubmitRating } from '../../features/ratings/hooks';
 import RatingModal from '../modals/RatingModal';
@@ -27,9 +28,13 @@ function toErrorMessage(err, fallback = 'Failed to submit rating') {
 
 export default function RatingsPromptManager() {
   const { accessToken, isInitialized, user } = useAuthStore();
+  const location = useLocation();
+  const pathname = location.pathname || '';
+  const isMeetingRoute = pathname.includes('/meeting') || pathname.includes('/join');
+
   const enabled = useMemo(
-    () => Boolean(isInitialized && accessToken && user?.role === 'student'),
-    [isInitialized, accessToken, user?.role]
+    () => Boolean(isInitialized && accessToken && user?.role === 'student' && !isMeetingRoute),
+    [isInitialized, accessToken, user?.role, isMeetingRoute]
   );
 
   const {

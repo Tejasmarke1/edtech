@@ -12,7 +12,6 @@ function resolveRoomName(roomName, meetingLink) {
 function resolveJitsiRuntimeConfig(meetingLink) {
   const envDomain = import.meta.env.VITE_JITSI_DOMAIN;
   const envExternalApi = import.meta.env.VITE_JITSI_EXTERNAL_API_URL;
-  const envHttpPort = import.meta.env.VITE_JITSI_HTTP_PORT || '8080';
 
   if (envDomain || envExternalApi) {
     return {
@@ -25,16 +24,6 @@ function resolveJitsiRuntimeConfig(meetingLink) {
   if (meetingLink) {
     try {
       const url = new URL(meetingLink);
-
-      const isLocalHost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-      if (import.meta.env.DEV && isLocalHost && url.protocol === 'https:') {
-        const localHttpDomain = `${url.hostname}:${envHttpPort}`;
-        return {
-          domain: localHttpDomain,
-          externalApiUrl: `http://${localHttpDomain}/external_api.js`,
-          noSSL: true,
-        };
-      }
 
       if (url.protocol === 'http:') {
         return {
@@ -94,8 +83,13 @@ function loadJitsiExternalApi(scriptUrl) {
 
 function buildNoSslIframeUrl({ externalApiUrl, roomName, jwtToken }) {
   const origin = new URL(externalApiUrl, window.location.href).origin;
-  const params = new URLSearchParams({ jwt: jwtToken });
-  return `${origin}/${roomName}?${params.toString()}#config.prejoinPageEnabled=false&config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
+  const params = new URLSearchParams();
+  if (jwtToken) {
+    params.set('jwt', jwtToken);
+  }
+  const query = params.toString();
+  const queryPart = query ? `?${query}` : '';
+  return `${origin}/${roomName}${queryPart}#config.prejoinPageEnabled=false&config.startWithAudioMuted=true&config.startWithVideoMuted=true`;
 }
 
 export default function useJitsiMeeting({
@@ -126,7 +120,7 @@ export default function useJitsiMeeting({
   }, []);
 
   useEffect(() => {
-    if (!containerRef?.current || !effectiveRoom || !jwtToken) return;
+    if (!containerRef?.current || !effectiveRoom) return;
 
     let mounted = true;
 
@@ -169,7 +163,7 @@ export default function useJitsiMeeting({
           width: '100%',
           height: '100%',
           noSSL: jitsiConfig.noSSL,
-          jwt: jwtToken,
+          ...(jwtToken ? { jwt: jwtToken } : {}),
           userInfo: {
             displayName: displayName || 'Guest',
             email: email || '',
@@ -178,8 +172,12 @@ export default function useJitsiMeeting({
             startWithAudioMuted: true,
             startWithVideoMuted: true,
             prejoinPageEnabled: false,
+            prejoinConfig: {
+              enabled: false,
+            },
             disableDeepLinking: true,
             enableWelcomePage: false,
+            disableThirdPartyRequests: true,
             // Local non-SSL setups frequently fail bridge websocket TLS;
             // force datachannel transport to keep conference stable in dev.
             openBridgeChannel: jitsiConfig.noSSL ? 'datachannel' : 'websocket',
@@ -208,6 +206,9 @@ export default function useJitsiMeeting({
 
         const api = new window.JitsiMeetExternalAPI(jitsiConfig.domain, options);
         apiRef.current = api;
+        if (mounted) {
+          setIsConnecting(false);
+        }
 
         api.addEventListener('videoConferenceJoined', () => {
           if (!mounted) return;

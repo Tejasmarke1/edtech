@@ -73,6 +73,23 @@ def _raw_json(payload: dict) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _next_date_for_day(day_key: str) -> date:
+    target = {
+        "mon": 0,
+        "tue": 1,
+        "wed": 2,
+        "thu": 3,
+        "fri": 4,
+        "sat": 5,
+        "sun": 6,
+    }[day_key]
+    today = date.today()
+    days_ahead = (target - today.weekday()) % 7
+    if days_ahead == 0:
+        days_ahead = 7
+    return today + timedelta(days=days_ahead)
+
+
 # ===================================================================
 # 1. HEALTH CHECK
 # ===================================================================
@@ -389,7 +406,7 @@ class TestSessions:
                 "teacher_id": "sess_t@example.com",
                 "subject_master_id": self.subject_entry_id,
                 "slot_id": self.slot_id,
-                "session_date": str(date.today() + timedelta(days=1)),
+                "session_date": str(_next_date_for_day("tue")),
                 "topic_description": "Help with gravity",
             },
         )
@@ -516,6 +533,21 @@ class TestSessions:
         client.put(
             f"/api/v1/sessions/{session['id']}/accept", headers=self.t_headers
         )
+
+        # Student cannot join before the teacher starts the meeting.
+        r = client.get(
+            f"/api/v1/sessions/{session['id']}/join", headers=self.s_headers
+        )
+        assert r.status_code == 400
+        assert "Teacher has not started" in r.json()["detail"]
+
+        # Teacher joins first, which initializes the room for the session.
+        r = client.get(
+            f"/api/v1/sessions/{session['id']}/join", headers=self.t_headers
+        )
+        assert r.status_code == 200
+
+        # Student can then join the same meeting.
         r = client.get(
             f"/api/v1/sessions/{session['id']}/join", headers=self.s_headers
         )
@@ -524,6 +556,17 @@ class TestSessions:
         assert "meeting_link" in body
         assert "jwt_token" in body
         assert "room_name" in body
+
+    def test_student_cannot_create_room(self, client: TestClient):
+        session = self._request_session(client)
+        client.put(
+            f"/api/v1/sessions/{session['id']}/accept", headers=self.t_headers
+        )
+
+        r = client.post(
+            f"/api/v1/sessions/{session['id']}/create-room", headers=self.s_headers
+        )
+        assert r.status_code == 403
 
     def test_join_before_accept_fails(self, client: TestClient):
         session = self._request_session(client)
@@ -601,7 +644,7 @@ class TestSessions:
 
     # ---- Double booking prevention ----
     def test_double_booking_prevented(self, client: TestClient):
-        future = str(date.today() + timedelta(days=1))
+        future = str(_next_date_for_day("tue"))
         # First booking succeeds
         r = client.post(
             "/api/v1/sessions/request",
@@ -627,9 +670,24 @@ class TestSessions:
         )
         assert r.status_code == 400
 
+    def test_request_slot_day_date_mismatch_rejected(self, client: TestClient):
+        mismatch = str(_next_date_for_day("wed"))
+        r = client.post(
+            "/api/v1/sessions/request",
+            headers=self.s_headers,
+            json={
+                "teacher_id": "sess_t@example.com",
+                "subject_master_id": self.subject_entry_id,
+                "slot_id": self.slot_id,
+                "session_date": mismatch,
+            },
+        )
+        assert r.status_code == 400
+        assert "choose an appropriate date" in str(r.json().get("detail", "")).lower()
+
     def test_booking_allowed_after_cancellation(self, client: TestClient):
         """After a student cancels, the same slot+date can be booked again."""
-        future = str(date.today() + timedelta(days=1))
+        future = str(_next_date_for_day("tue"))
         r = client.post(
             "/api/v1/sessions/request",
             headers=self.s_headers,
@@ -789,7 +847,9 @@ class TestJitsiIntegration:
         assert body["session_id"] == session["id"]
         assert body["meeting_link"].startswith("https://meet.jit.si/")
         assert len(body["room_name"]) == 12
-        assert body["jwt_token"]
+        assert "jwt_token" in body
+        if not body["meeting_link"].startswith("https://meet.jit.si/"):
+            assert body["jwt_token"]
 
     def test_create_room_student(self, client: TestClient):
         session = self._create_accepted_session(client)
@@ -797,7 +857,29 @@ class TestJitsiIntegration:
             f"/api/v1/sessions/{session['id']}/create-room", headers=self.s_headers
         )
         assert r.status_code == 201
-        assert r.json()["jwt_token"]
+        body = r.json()
+        assert "jwt_token" in body
+        if not body["meeting_link"].startswith("https://meet.jit.si/"):
+            assert body["jwt_token"]
+
+    def test_create_room_is_idempotent_for_participants(self, client: TestClient):
+        session = self._create_accepted_session(client)
+
+        teacher_create = client.post(
+            f"/api/v1/sessions/{session['id']}/create-room", headers=self.t_headers
+        )
+        assert teacher_create.status_code == 201
+
+        student_create = client.post(
+            f"/api/v1/sessions/{session['id']}/create-room", headers=self.s_headers
+        )
+        assert student_create.status_code == 201
+
+        teacher_body = teacher_create.json()
+        student_body = student_create.json()
+
+        assert teacher_body["room_name"] == student_body["room_name"]
+        assert teacher_body["meeting_link"] == student_body["meeting_link"]
 
     def test_create_room_before_accept_fails(self, client: TestClient):
         r = client.post(
@@ -823,7 +905,9 @@ class TestJitsiIntegration:
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["jwt_token"]
+        assert "jwt_token" in body
+        if not body["meeting_link"].startswith("https://meet.jit.si/"):
+            assert body["jwt_token"]
         assert body["room_name"]
 
     def test_join_returns_jwt_for_student(self, client: TestClient):
@@ -833,7 +917,9 @@ class TestJitsiIntegration:
         )
         assert r.status_code == 200
         body = r.json()
-        assert body["jwt_token"]
+        assert "jwt_token" in body
+        if not body["meeting_link"].startswith("https://meet.jit.si/"):
+            assert body["jwt_token"]
         assert body["room_name"]
 
     def test_non_participant_cannot_join(self, client: TestClient):

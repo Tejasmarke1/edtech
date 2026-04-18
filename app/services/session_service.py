@@ -15,7 +15,12 @@ from app.repositories import availability_repo, enrollment_repo, payment_repo, s
 from app.schemas.session import EnrollmentRead, GroupSessionCreate, ProposeTimeRequest, SessionRead, SessionRequest
 from app.services import notification_service
 from app.utils.exceptions import BadRequestError, ForbiddenError, NotFoundError
-from app.utils.jitsi import build_meeting_url, create_jitsi_token, generate_room_name
+from app.utils.jitsi import (
+    build_meeting_url,
+    create_jitsi_token,
+    generate_room_name,
+    should_issue_jitsi_jwt,
+)
 from app.utils.pagination import Page
 
 
@@ -76,6 +81,18 @@ def _ensure_within_scheduled_window(db: Session, session: SessionSchedule) -> No
         )
 
 
+def _ensure_slot_matches_session_date(slot, session_date) -> None:
+    expected_day = slot.day_of_week
+    actual_day = _weekday_to_enum(session_date.weekday())
+    if expected_day != actual_day:
+        expected_label = expected_day.value.capitalize()
+        actual_label = actual_day.value.capitalize()
+        raise BadRequestError(
+            f"Selected date is {actual_label}, but this slot is for {expected_label}. "
+            "Please choose an appropriate date for the selected slot."
+        )
+
+
 # ---------- Student: request session ----------
 def request_session(db: Session, student: User, payload: SessionRequest) -> SessionSchedule:
     # Validate teacher exists
@@ -95,6 +112,8 @@ def request_session(db: Session, student: User, payload: SessionRequest) -> Sess
     if not slot or slot.user_name != payload.teacher_id or not slot.is_active:
         raise NotFoundError("Availability slot not found for this teacher")
 
+    _ensure_slot_matches_session_date(slot, payload.session_date)
+
     # Prevent double-booking: same teacher + slot + date
     if session_repo.has_conflicting_session(
         db, payload.teacher_id, payload.slot_id, payload.session_date
@@ -102,8 +121,6 @@ def request_session(db: Session, student: User, payload: SessionRequest) -> Sess
         raise BadRequestError(
             "This teacher is already booked for the selected slot and date"
         )
-
-    room_name, meeting_link = _generate_meeting_link()
 
     new_session = session_repo.create_session(
         db,
@@ -113,8 +130,6 @@ def request_session(db: Session, student: User, payload: SessionRequest) -> Sess
         slot_id=payload.slot_id,
         session_date=payload.session_date,
         topic_description=payload.topic_description,
-        meeting_link=meeting_link,
-        room_name=room_name,
     )
 
     notification_service.create_notification(
@@ -382,16 +397,24 @@ def get_meeting_link(db: Session, user: User, session_id: str) -> dict:
         _ensure_within_scheduled_window(db, session)
 
     if not session.meeting_link or not session.room_name:
-        raise BadRequestError("No meeting room created for this session")
+        if not is_teacher:
+            raise BadRequestError("Teacher has not started the meeting yet")
+        room_name, meeting_link = _generate_meeting_link()
+        session_repo.update_session_fields(db, session, {
+            "room_name": room_name,
+            "meeting_link": meeting_link,
+        })
 
-    display = user.profile.full_name if user.profile and user.profile.full_name else user.user_name
-    token = create_jitsi_token(
-        room_name=session.room_name,
-        user_name=user.user_name,
-        display_name=display,
-        email=user.user_name,
-        is_moderator=is_teacher,
-    )
+    token: str | None = None
+    if should_issue_jitsi_jwt():
+        display = user.profile.full_name if user.profile and user.profile.full_name else user.user_name
+        token = create_jitsi_token(
+            room_name=session.room_name,
+            user_name=user.user_name,
+            display_name=display,
+            email=user.user_name,
+            is_moderator=is_teacher,
+        )
 
     return {
         "session_id": session.id,
@@ -407,36 +430,39 @@ def create_room(db: Session, user: User, session_id: str) -> dict:
 
     is_teacher = session.teacher_id == user.user_name
 
+    if not is_teacher:
+        raise ForbiddenError("Only the teacher can start the meeting room")
+
     if session.session_type == SessionType.group:
-        if not is_teacher:
-            enrollment = enrollment_repo.get_enrollment(db, session.id, user.user_name)
-            if not enrollment or enrollment.status != EnrollmentStatus.enrolled:
-                raise NotFoundError("Session not found")
+        _ensure_within_scheduled_window(db, session)
     else:
-        if not is_teacher and session.student_id != user.user_name:
+        if session.teacher_id != user.user_name:
             raise NotFoundError("Session not found")
 
     if session.status != SessionStatus.accepted:
         raise BadRequestError("Room can only be created for accepted sessions")
 
-    if session.session_type == SessionType.group:
-        _ensure_within_scheduled_window(db, session)
+    # Keep room creation idempotent so all participants join the same room.
+    if session.room_name and session.meeting_link:
+        room_name = session.room_name
+        meeting_link = session.meeting_link
+    else:
+        room_name, meeting_link = _generate_meeting_link()
+        session_repo.update_session_fields(db, session, {
+            "room_name": room_name,
+            "meeting_link": meeting_link,
+        })
 
-    room_name, meeting_link = _generate_meeting_link()
-
-    session_repo.update_session_fields(db, session, {
-        "room_name": room_name,
-        "meeting_link": meeting_link,
-    })
-
-    display = user.profile.full_name if user.profile and user.profile.full_name else user.user_name
-    token = create_jitsi_token(
-        room_name=room_name,
-        user_name=user.user_name,
-        display_name=display,
-        email=user.user_name,
-        is_moderator=is_teacher,
-    )
+    token: str | None = None
+    if should_issue_jitsi_jwt():
+        display = user.profile.full_name if user.profile and user.profile.full_name else user.user_name
+        token = create_jitsi_token(
+            room_name=room_name,
+            user_name=user.user_name,
+            display_name=display,
+            email=user.user_name,
+            is_moderator=is_teacher,
+        )
 
     return {
         "session_id": session.id,
@@ -548,8 +574,6 @@ def create_group_session(
             "You already have a session scheduled for the selected slot and date"
         )
 
-    room_name, meeting_link = _generate_meeting_link()
-
     new_session = session_repo.create_group_session(
         db,
         teacher_id=teacher.user_name,
@@ -558,8 +582,6 @@ def create_group_session(
         session_date=resolved_session_date,
         max_students=payload.max_students,
         topic_description=payload.topic_description,
-        meeting_link=meeting_link,
-        room_name=room_name,
     )
 
     return new_session

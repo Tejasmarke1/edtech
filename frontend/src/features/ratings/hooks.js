@@ -21,6 +21,7 @@ function writeDismissedIds(ids) {
 export function usePendingRatings(enabled) {
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const loadPending = useCallback(async () => {
     if (!enabled) {
@@ -29,11 +30,21 @@ export function usePendingRatings(enabled) {
     }
 
     setLoading(true);
+    setError('');
     try {
       const data = await ratingsApi.getPending();
       const dismissed = readDismissedIds();
       const filtered = (data || []).filter((item) => !dismissed.includes(item.session_id));
       setPending(filtered);
+    } catch (err) {
+      // Keep ratings prompts non-blocking if API is temporarily unavailable.
+      const detail = err?.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setError(detail);
+      } else {
+        setError(err?.message || 'Unable to load pending ratings');
+      }
+      setPending([]);
     } finally {
       setLoading(false);
     }
@@ -71,6 +82,7 @@ export function usePendingRatings(enabled) {
     pending,
     current,
     loading,
+    error,
     loadPending,
     dismissCurrent,
     removeCurrentAfterSubmit,

@@ -88,7 +88,7 @@ export default function SessionDetail() {
     try {
       const [{ data }, txResponse] = await Promise.all([
         apiClient.get('/sessions/my?skip=0&limit=100'),
-        apiClient.get('/payments/transactions?skip=0&limit=200').catch(() => ({ data: { items: [] } })),
+        apiClient.get('/payments/transactions?skip=0&limit=100').catch(() => ({ data: { items: [] } })),
       ]);
 
       const items = data.items || (Array.isArray(data) ? data : []);

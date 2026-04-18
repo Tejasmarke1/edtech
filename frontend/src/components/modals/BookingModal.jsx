@@ -19,6 +19,17 @@ function formatSlotLabel(slot) {
   return `${day} ${slot.start_time} - ${slot.end_time}`.trim();
 }
 
+function getWeekdayKey(dateValue) {
+  const parsed = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][parsed.getDay()];
+}
+
+function formatDayLabel(dayKey) {
+  if (!dayKey) return 'selected day';
+  return dayKey.charAt(0).toUpperCase() + dayKey.slice(1, 3);
+}
+
 export default function BookingModal({ isOpen, onClose, teacherId, teacherName, subjects = [], availability = [] }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
@@ -35,6 +46,17 @@ export default function BookingModal({ isOpen, onClose, teacherId, teacherName, 
   if (!isOpen) return null;
 
   const onSubmit = async (data) => {
+    const selectedSlot = availability.find((slot) => slot.id === data.slot_id);
+    const slotDay = String(selectedSlot?.day_of_week || '').toLowerCase();
+    const selectedDateDay = getWeekdayKey(data.session_date);
+
+    if (slotDay && selectedDateDay && slotDay !== selectedDateDay) {
+      toast.error(
+        `Selected date is ${formatDayLabel(selectedDateDay)}, but this slot is for ${formatDayLabel(slotDay)}. Please choose an appropriate date.`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await apiClient.post('/sessions/request', {

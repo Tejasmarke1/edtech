@@ -116,7 +116,9 @@ class TestMeetingSmoke:
         for body in (student_body, teacher_body):
             assert body.get("room_name")
             assert body.get("meeting_link")
-            assert body.get("jwt_token")
+            assert "jwt_token" in body
+            if not str(body.get("meeting_link", "")).startswith("https://meet.jit.si/"):
+                assert body.get("jwt_token")
 
         assert student_body["room_name"] == teacher_body["room_name"]
         assert student_body["meeting_link"] == teacher_body["meeting_link"]
